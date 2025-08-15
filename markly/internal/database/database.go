@@ -14,6 +14,7 @@ import (
 
 type Service interface {
 	Health() map[string]string
+	Client() *mongo.Client
 }
 
 type service struct {
@@ -51,3 +52,8 @@ func (s *service) Health() map[string]string {
 		"message": "It's healthy",
 	}
 }
+
+func (s *service) Client() *mongo.Client {
+	return s.db
+}
+

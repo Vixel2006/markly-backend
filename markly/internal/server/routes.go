@@ -69,7 +69,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerBookmarkRoutes(r *mux.Router) {
-	bh := handlers.NewBookmarksHandler(&s.db)
+	bh := handlers.NewBookmarksHandler(s.db)
 
 	r.HandleFunc("/api/bookmarks", bh.GetBookmarks).Methods("GET")
 	r.HandleFunc("/api/bookmarks", bh.AddBookmark).Methods("POST")

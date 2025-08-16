@@ -9,3 +9,8 @@ type Bookmark struct {
     CreatedAt primitive.DateTime   `bson:"datetime" json:"datetime"`
 }
 
+type BookmarkUpdate struct {
+    Title *string   `json:"title,omitempty"`
+    Tags  *[]string `json:"tags,omitempty"`
+}
+

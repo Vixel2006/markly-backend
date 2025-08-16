@@ -145,6 +145,64 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"message": "Bookmark updated"})
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	id, err := primitive.ObjectIDFromHex(idStr)
+
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var nbm models.BookmarkUpdate
+
+	if err := json.NewDecoder(r.Body).Decode(&nbm); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	updateFields := bson.M{}
+
+	if nbm.Title != nil {
+		updateFields["title"] = *nbm.Title
+	}
+
+	if nbm.Tags != nil {
+		updateFields["tags"] = *nbm.Tags
+	}
+
+	if len(updateFields) == 0 {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": id}
+	update := bson.M{"$set": updateFields}
+	
+	var updatedBookmark models.Bookmark
+
+	collection := h.db.Client().Database("markly").Collection("bookmarks")
+
+	result, err := collection.UpdateOne(context.Background(), filter, update)
+
+	if err != nil {
+		http.Error(w, "Failed to update bookmark", http.StatusInternalServerError)
+		return
+	}
+
+	if result.MatchedCount == 0 {
+		http.Error(w, "Bookmark not found", http.StatusNotFound)
+		return
+	}
+
+	err = collection.FindOne(context.Background(), filter).Decode(&updatedBookmark)
+
+	if err != nil {
+		http.Error(w, "Failed to find the bookmark", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(updatedBookmark)
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"markly/internal/handlers"
+	"markly/internal/middlewares"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -71,18 +72,18 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerBookmarkRoutes(r *mux.Router) {
 	bh := handlers.NewBookmarksHandler(s.db)
 
-	r.HandleFunc("/api/bookmarks", bh.GetBookmarks).Methods("GET")
-	r.HandleFunc("/api/bookmarks", bh.AddBookmark).Methods("POST")
-	r.HandleFunc("/api/bookmarks/{id}", bh.GetBookmarkByID).Methods("GET")
-	r.HandleFunc("/api/bookmarks/{id}", bh.DeleteBookmark).Methods("DELETE")
-	r.HandleFunc("/api/bookmarks/{id}", bh.UpdateBookmark).Methods("PUT")
+	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarks))).Methods("GET")
+	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.AddBookmark))).Methods("POST")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarkByID))).Methods("GET")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.DeleteBookmark))).Methods("DELETE")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.UpdateBookmark))).Methods("PUT")
 }
 
 func (s *Server) registerAuthRoutes(r *mux.Router) {
-	uh := handlers.NewUserHandler(&s.db)
+	uh := handlers.NewUserHandler(s.db)
 
-	r.HandleFunc("/api/register", uh.Register).Methods("POST")
-	r.HandleFunc("/api/login", uh.Login).Methods("POST")
-	r.HandleFunc("/api/logout", uh.Logout).Methods("GET")
+	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST")
+	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST")
+	r.HandleFunc("/api/auth/logout", uh.Logout).Methods("GET")
 }
 

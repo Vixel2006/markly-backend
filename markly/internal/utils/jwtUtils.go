@@ -1,22 +1,32 @@
 package utils
 
 import (
+	"log"
 	"time"
 	"github.com/golang-jwt/jwt/v5"
+	"os"
+  "github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-var jwtKey = []byte("super_secret_key")
-
 type Claims struct {
-	Email string `json:"email"`
+	ID string `json:"id"`
 	jwt.RegisteredClaims
 }
 
 // Generate JWT
-func GenerateJWT(email string) (string, error) {
+func GenerateJWT(id primitive.ObjectID) (string, error) {
+	err := godotenv.Load()
+
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	jwtKey := []byte(os.Getenv("JWT_SECRET"))
+
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
-		Email: email,
+		ID: id.Hex(),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},

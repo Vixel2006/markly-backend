@@ -26,16 +26,26 @@ func NewBookmarksHandler(db database.Service) *BookmarkHandler {
 }
 
 func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	tagsParam := r.URL.Query().Get("tags")
 
-	filter := bson.M{}
+	filter := bson.M{"user_id": userID}
 	
 	if tagsParam != "" {
 		tags := strings.Split(tagsParam, ",")
 	
-		filter = bson.M{
-			"tags": bson.M{"$in": tags},
-		}
+		filter["tags"] = bson.M{"$in": tags}
 	}
 
 	var bookmarks []models.Bookmark
@@ -68,26 +78,38 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
-	var bm models.Bookmark
+    userIDStr, ok := r.Context().Value("userID").(string)
+    if !ok {
+        http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+        return
+    }
 
-	if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
+    userID, err := primitive.ObjectIDFromHex(userIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+        return
+    }
 
-	bm.ID = primitive.NewObjectID()
-	bm.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+    var bm models.Bookmark
+    if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
 
-	collection := h.db.Client().Database("markly").Collection("bookmarks")
-	_, err := collection.InsertOne(context.Background(), bm)
+    bm.ID = primitive.NewObjectID()
+    bm.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+    bm.UserID = userID
 
-	if err != nil {
-		http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
-	}
+    collection := h.db.Client().Database("markly").Collection("bookmarks")
+    _, err = collection.InsertOne(context.Background(), bm)
+    if err != nil {
+        http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(bm)
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(bm)
 }
 
 func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request) {

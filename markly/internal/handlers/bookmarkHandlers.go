@@ -105,7 +105,29 @@ func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request
 }
 
 func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"message": "Bookmark deleted"})
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	collection := h.db.Client().Database("markly").Collection("bookmarks")
+
+	id, err := primitive.ObjectIDFromHex(idStr)
+
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": id}
+
+	delete_result, err := collection.DeleteOne(context.Background(), filter)
+
+	if err != nil {
+		http.Error(w, "Cannot delete the bookmark", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(delete_result)
 }
 
 func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {

@@ -76,7 +76,6 @@ func (s *Server) registerBookmarkRoutes(r *mux.Router) {
 	r.HandleFunc("/api/bookmarks/{id}", bh.GetBookmarkByID).Methods("GET")
 	r.HandleFunc("/api/bookmarks/{id}", bh.DeleteBookmark).Methods("DELETE")
 	r.HandleFunc("/api/bookmarks/{id}", bh.UpdateBookmark).Methods("PUT")
-	r.HandleFunc("/api/bookmarks/tags/{tags}", bh.GetBookmarksByTags).Methods("GET")
 }
 
 func (s *Server) registerAuthRoutes(r *mux.Router) {

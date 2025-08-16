@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"log"
 	"encoding/json"
 	"net/http"
@@ -25,9 +26,22 @@ func NewBookmarksHandler(db database.Service) *BookmarkHandler {
 }
 
 func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
+	tagsParam := r.URL.Query().Get("tags")
+
+	filter := bson.M{}
+	
+	if tagsParam != "" {
+		tags := strings.Split(tagsParam, ",")
+	
+		filter = bson.M{
+			"tags": bson.M{"$in": tags},
+		}
+	}
+
 	var bookmarks []models.Bookmark
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
-	cursor, err := collection.Find(context.Background(), bson.M{})
+
+	cursor, err := collection.Find(context.Background(), filter)
 
 	if err != nil {
 		log.Fatal(err)
@@ -132,9 +146,5 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 
 func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Bookmark updated"})
-}
-
-func (h *BookmarkHandler) GetBookmarksByTags(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"message": "Bookmarks by tags"})
 }
 

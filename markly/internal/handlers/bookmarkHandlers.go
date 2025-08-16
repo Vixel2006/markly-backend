@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/bson"
+	"github.com/gorilla/mux"
 	"context"
 	"time"
 
@@ -25,9 +26,7 @@ func NewBookmarksHandler(db database.Service) *BookmarkHandler {
 
 func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 	var bookmarks []models.Bookmark
-	// We first get all bookmarks from the collection
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
-	// define a bookmarks slice and append all bookmarks
 	cursor, err := collection.Find(context.Background(), bson.M{})
 
 	if err != nil {
@@ -78,7 +77,31 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"message": "Single bookmark"})
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	collection := h.db.Client().Database("markly").Collection("bookmarks")
+
+	id, err := primitive.ObjectIDFromHex(idStr)
+
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": id}
+
+	var bm models.Bookmark
+
+	err = collection.FindOne(context.Background(), filter).Decode(&bm)
+
+	if err != nil {
+		http.Error(w, "Cannot find the bookmark.", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bm)
 }
 
 func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request) {

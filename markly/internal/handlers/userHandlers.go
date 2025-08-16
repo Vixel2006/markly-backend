@@ -101,7 +101,3 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
   json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
-func (u *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"message": "Signout of your account"})
-}
-

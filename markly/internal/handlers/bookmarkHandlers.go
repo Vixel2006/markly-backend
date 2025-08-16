@@ -78,41 +78,54 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
-    userIDStr, ok := r.Context().Value("userID").(string)
-    if !ok {
-        http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-        return
-    }
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+			http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+			return
+	}
 
-    userID, err := primitive.ObjectIDFromHex(userIDStr)
-    if err != nil {
-        http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
-        return
-    }
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+			http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+			return
+	}
 
-    var bm models.Bookmark
-    if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
-        http.Error(w, "Invalid JSON", http.StatusBadRequest)
-        return
-    }
+	var bm models.Bookmark
+	if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+	}
 
-    bm.ID = primitive.NewObjectID()
-    bm.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
-    bm.UserID = userID
+	bm.ID = primitive.NewObjectID()
+	bm.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	bm.UserID = userID
 
-    collection := h.db.Client().Database("markly").Collection("bookmarks")
-    _, err = collection.InsertOne(context.Background(), bm)
-    if err != nil {
-        http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
-        return
-    }
+	collection := h.db.Client().Database("markly").Collection("bookmarks")
+	_, err = collection.InsertOne(context.Background(), bm)
+	if err != nil {
+			http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
+			return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(bm)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(bm)
 }
 
 func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 
@@ -125,7 +138,7 @@ func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	filter := bson.M{"_id": id}
+	filter := bson.M{"_id": id, "user_id": userID}
 
 	var bm models.Bookmark
 
@@ -141,6 +154,18 @@ func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request
 }
 
 func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 
@@ -153,7 +178,7 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	filter := bson.M{"_id": id}
+	filter := bson.M{"_id": id, "user_id": userID}
 
 	delete_result, err := collection.DeleteOne(context.Background(), filter)
 
@@ -167,6 +192,18 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 
@@ -199,7 +236,7 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	filter := bson.M{"_id": id}
+	filter := bson.M{"_id": id, "user_id": userID}
 	update := bson.M{"$set": updateFields}
 	
 	var updatedBookmark models.Bookmark

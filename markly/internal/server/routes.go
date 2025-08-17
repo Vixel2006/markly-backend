@@ -32,10 +32,10 @@ func (s *Server) RegisterRoutes() http.Handler {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// CORS Headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Wildcard allows all origins
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // Wildcard allows all origins
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Credentials", "false") // Credentials not allowed with wildcard origins
+		w.Header().Set("Access-Control-Allow-Credentials", "true") // Credentials not allowed with wildcard origins
 
 		// Handle preflight OPTIONS requests
 		if r.Method == http.MethodOptions {
@@ -72,17 +72,17 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerBookmarkRoutes(r *mux.Router) {
 	bh := handlers.NewBookmarksHandler(s.db)
 
-	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarks))).Methods("GET")
-	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.AddBookmark))).Methods("POST")
-	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarkByID))).Methods("GET")
-	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.DeleteBookmark))).Methods("DELETE")
-	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.UpdateBookmark))).Methods("PUT")
+	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarks))).Methods("GET", "OPTIONS")
+	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.AddBookmark))).Methods("POST", "OPTIONS")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarkByID))).Methods("GET", "OPTIONS")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.DeleteBookmark))).Methods("DELETE", "OPTIONS")
+	r.Handle("/api/bookmarks/{id}", middlewares.AuthMiddleware(http.HandlerFunc(bh.UpdateBookmark))).Methods("PUT", "OPTIONS")
 }
 
 func (s *Server) registerAuthRoutes(r *mux.Router) {
 	uh := handlers.NewUserHandler(s.db)
 
-	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST")
-	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST")
+	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
+	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")
 }
 

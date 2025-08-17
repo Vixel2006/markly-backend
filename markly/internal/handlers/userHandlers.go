@@ -30,7 +30,7 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid user data input", http.StatusBadRequest)
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 8)
 
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
@@ -81,12 +81,12 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	err := collection.FindOne(context.Background(), bson.M{"email": creds.Email}).Decode(&user)
 	if err != nil {
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		http.Error(w, "Email not found", http.StatusUnauthorized)
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password)); err != nil {
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		http.Error(w, "Incorrect Password", http.StatusUnauthorized)
 		return
 	}
 

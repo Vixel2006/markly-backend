@@ -84,5 +84,6 @@ func (s *Server) registerAuthRoutes(r *mux.Router) {
 
 	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")
+	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.GetMyProfile))).Methods("GET", "OPTIONS")
 }
 

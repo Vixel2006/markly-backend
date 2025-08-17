@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"time"
 	"encoding/json"
 	"net/http"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/bcrypt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -99,5 +101,41 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
   json.NewEncoder(w).Encode(map[string]string{"token": token})
+}
+
+func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "User ID not found in context", http.StatusInternalServerError)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusInternalServerError)
+		return
+	}
+
+	var user models.User
+	collection := u.db.Client().Database("markly").Collection("users")
+
+	filter := bson.M{"_id": userID}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = collection.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to fetch user profile", http.StatusInternalServerError)
+		return
+	}
+
+	user.Password = ""
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 

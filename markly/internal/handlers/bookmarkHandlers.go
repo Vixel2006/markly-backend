@@ -80,20 +80,20 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value("userID").(string)
 	if !ok {
-			http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-			return
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
 	}
 
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
-			http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
-			return
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
 	}
 
 	var bm models.Bookmark
 	if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
 
 	bm.ID = primitive.NewObjectID()
@@ -103,8 +103,8 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
 	_, err = collection.InsertOne(context.Background(), bm)
 	if err != nil {
-			http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
-			return
+		http.Error(w, "Failed to insert bookmark", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

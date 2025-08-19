@@ -50,7 +50,7 @@ func (h *CollectionHandler) AddCollection(w http.ResponseWriter, r *http.Request
 	collection := h.db.Client().Database("markly").Collection("collections")
 
 	indexModel := mongo.IndexModel{
-		Keys:    bson.M{"name": 1, "user_id": 1},
+		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 

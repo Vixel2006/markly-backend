@@ -10,7 +10,7 @@ type Bookmark struct {
 	TagsID        []primitive.ObjectID `bson:"tags" json:"tags"`
 	CollectionsID []primitive.ObjectID `bson:"collections" json:"collections"`
 	CategoryID    *primitive.ObjectID  `bson:"category" json:"category"`
-	CreatedAt     primitive.DateTime   `bson:"datetime" json:"datetime"`
+	CreatedAt     primitive.DateTime   `bson:"created_at" json:"created_at"`
 	UserID        primitive.ObjectID   `bson:"user_id,omitempty" json:"user_id"`
 	IsFav         bool                 `bson:"is_fav" json:"is_fav"`
 }
@@ -22,5 +22,5 @@ type BookmarkUpdate struct {
 	TagsID        *[]primitive.ObjectID `json:"tags,omitempty" bson:"tags,omitempty"`
 	CollectionsID *[]primitive.ObjectID `json:"collections,omitempty" bson:"collections,omitempty"`
 	CategoryID    *primitive.ObjectID   `json:"category,omitempty" bson:"category,omitempty"`
-	IsFav         *bool                 `json:"isFav,omitempty" bson:"is_fav,omitempty"`
+	IsFav         *bool                 `json:"is_fav,omitempty" bson:"is_fav,omitempty"`
 }

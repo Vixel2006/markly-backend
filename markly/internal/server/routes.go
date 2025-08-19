@@ -24,6 +24,9 @@ func (s *Server) RegisterRoutes() http.Handler {
 	// Register the User Auth and Bookmark Api
 	s.registerBookmarkRoutes(r)
 	s.registerAuthRoutes(r)
+	s.registerTagRoutes(r)
+	s.registerCollectionRoutes(r)
+	s.registerCategoryRoutes(r)
 
 	return r
 }
@@ -85,5 +88,27 @@ func (s *Server) registerAuthRoutes(r *mux.Router) {
 	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")
 	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.GetMyProfile))).Methods("GET", "OPTIONS")
+}
+
+
+func (s *Server) registerCategoryRoutes(r *mux.Router) {
+	ch := handlers.NewCategoryHandler(s.db)
+	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.AddCategory))).Methods("POST", "OPTIONS")
+	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.GetCategories))).Methods("GET", "OPTIONS")
+	r.Handle("/api/categories/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ch.DeleteCategory))).Methods("DELETE", "OPTIONS")
+}
+
+func (s *Server) registerCollectionRoutes(r *mux.Router) {
+	clh := handlers.NewCollectionHandler(s.db)
+	r.Handle("/api/collections", middlewares.AuthMiddleware(http.HandlerFunc(clh.AddCollection))).Methods("POST", "OPTIONS")
+	r.Handle("/api/collections", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollections))).Methods("GET", "OPTIONS")
+	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollection))).Methods("GET", "OPTIONS")
+	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.DeleteCollection))).Methods("DELETE", "OPTIONS")
+}
+
+func (s *Server) registerTagRoutes(r *mux.Router) {
+	th := handlers.NewTagHandler(s.db)
+	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.AddTag))).Methods("POST", "OPTIONS")
+	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.GetTagsByID))).Methods("GET", "OPTIONS")
 }
 

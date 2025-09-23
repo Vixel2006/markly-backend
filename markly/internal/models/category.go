@@ -1,11 +1,17 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 type Category struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Emoji       string             `bson:"emoji" json:"emoji"`
-	Name        string             `bson:"name" json:"name"`
-	Description string             `bson:"description" json:"description"`
-	UserID      primitive.ObjectID `bson:"user_id" json:"user_id"`
+	ID     primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	UserID primitive.ObjectID `json:"user_id" bson:"user_id"`
+	Name   string             `json:"name" bson:"name"`
+	Emoji  string             `json:"emoji,omitempty" bson:"emoji,omitempty"`
+}
+
+type CategoryUpdate struct {
+	Name  *string `json:"name,omitempty" bson:"name,omitempty"`
+	Emoji *string `json:"emoji,omitempty" bson:"emoji,omitempty"`
 }

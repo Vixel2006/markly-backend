@@ -146,7 +146,7 @@ func (h *CollectionHandler) GetCollection(w http.ResponseWriter, r *http.Request
 
 	collection := h.db.Client().Database("markly").Collection("collections")
 
-	var col models.Collection
+	var col models.Collection // Use models.Collection
 	filter := bson.M{"_id": collectionID, "user_id": userID}
 	err = collection.FindOne(context.Background(), filter).Decode(&col)
 	if err == mongo.ErrNoDocuments {
@@ -229,10 +229,7 @@ func (h *CollectionHandler) UpdateCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var updatePayload struct {
-		Name *string `json:"name,omitempty" bson:"name,omitempty"`
-	}
-
+	var updatePayload models.CollectionUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
 		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
@@ -255,6 +252,10 @@ func (h *CollectionHandler) UpdateCollection(w http.ResponseWriter, r *http.Requ
 
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			http.Error(w, "Collection name already exists for this user.", http.StatusConflict)
+			return
+		}
 		log.Printf("Failed to update collection with ID %s for user %s: %v", idStr, userIDStr, err)
 		http.Error(w, "Failed to update collection", http.StatusInternalServerError)
 		return

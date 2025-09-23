@@ -29,13 +29,26 @@ func NewTagHandler(db database.Service) *TagHandler {
 }
 
 func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
-	var tag models.Tag
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID.", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format.", http.StatusUnauthorized)
+		return
+	}
+
+	var tag models.Tag // Use models.Tag
 	if err := json.NewDecoder(r.Body).Decode(&tag); err != nil {
 		http.Error(w, "Invalid JSON input: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	tag.ID = primitive.NewObjectID()
+	tag.UserID = userID
 	tag.WeeklyCount = 0
 	tag.PrevCount = 0
 	tag.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
@@ -43,15 +56,15 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 	collection := h.db.Client().Database("markly").Collection("tags")
 
 	indexModel := mongo.IndexModel{
-		Keys:    bson.M{"name": 1},
+		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 
-	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
+	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			log.Printf("Duplicate tag name: %v", err)
-			http.Error(w, "Tag name already exists.", http.StatusConflict)
+			log.Printf("Duplicate tag name for user: %v", err)
+			http.Error(w, "Tag name already exists for this user.", http.StatusConflict)
 		} else {
 			log.Printf("Failed to create index for tags: %v", err)
 			http.Error(w, "Failed to set up tag collection", http.StatusInternalServerError)
@@ -62,8 +75,8 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.InsertOne(context.Background(), tag)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			log.Println("Tag name already exists.")
-			http.Error(w, "Tag name already exists.", http.StatusConflict)
+			log.Println("Tag name already exists for this user.")
+			http.Error(w, "Tag name already exists for this user.", http.StatusConflict)
 		} else {
 			log.Printf("Failed to insert tag: %v", err)
 			http.Error(w, "Failed to insert tag", http.StatusInternalServerError)
@@ -77,6 +90,18 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := r.Context()
 	ids := r.URL.Query()["id"]
 
@@ -110,11 +135,11 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 			}
 
 			var tag models.Tag
-			filter := bson.M{"_id": objID}
+			filter := bson.M{"_id": objID, "user_id": userID}
 			err = collection.FindOne(ctx, filter).Decode(&tag)
 
 			if err != nil {
-				log.Printf("Error finding tag %s: %v", idStr, err)
+				log.Printf("Error finding tag %s for user %s: %v", idStr, userIDStr, err)
 				resultsChan <- result{Err: err}
 				return
 			}
@@ -140,7 +165,54 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *TagHandler) GetUserTags(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
+	var tags []models.Tag
+	collection := h.db.Client().Database("markly").Collection("tags")
+
+	filter := bson.M{"user_id": userID}
+	cursor, err := collection.Find(context.Background(), filter)
+	if err != nil {
+		log.Printf("Error finding tags for user %s: %v", userIDStr, err)
+		http.Error(w, "Failed to retrieve tags", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	if err := cursor.All(context.Background(), &tags); err != nil {
+		log.Printf("Error decoding tags: %v", err)
+		http.Error(w, "Error decoding tags", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tags)
+}
+
 func (h *TagHandler) DeleteTag(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 
@@ -151,17 +223,17 @@ func (h *TagHandler) DeleteTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	collection := h.db.Client().Database("markly").Collection("tags")
-	filter := bson.M{"_id": tagID}
+	filter := bson.M{"_id": tagID, "user_id": userID}
 
 	deleteResult, err := collection.DeleteOne(context.Background(), filter)
 	if err != nil {
-		log.Printf("Failed to delete tag with ID %s: %v", idStr, err)
+		log.Printf("Failed to delete tag with ID %s for user %s: %v", idStr, userIDStr, err)
 		http.Error(w, "Failed to delete tag", http.StatusInternalServerError)
 		return
 	}
 
 	if deleteResult.DeletedCount == 0 {
-		http.Error(w, "Tag not found", http.StatusNotFound)
+		http.Error(w, "Tag not found or unauthorized", http.StatusNotFound)
 		return
 	}
 
@@ -170,6 +242,18 @@ func (h *TagHandler) DeleteTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 
@@ -179,12 +263,7 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updatePayload struct {
-		Name        *string `json:"name,omitempty" bson:"name,omitempty"`
-		WeeklyCount *int    `json:"weeklyCount,omitempty" bson:"weekly_count,omitempty"`
-		PrevCount   *int    `json:"prevCount,omitempty" bson:"prev_count,omitempty"`
-	}
-
+	var updatePayload models.TagUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
 		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
@@ -206,7 +285,7 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := bson.M{"_id": tagID}
+	filter := bson.M{"_id": tagID, "user_id": userID}
 	update := bson.M{"$set": updateFields}
 
 	collection := h.db.Client().Database("markly").Collection("tags")
@@ -214,23 +293,23 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			http.Error(w, "Tag name already exists.", http.StatusConflict)
+			http.Error(w, "Tag name already exists for this user.", http.StatusConflict)
 		} else {
-			log.Printf("Failed to update tag with ID %s: %v", idStr, err)
+			log.Printf("Failed to update tag with ID %s for user %s: %v", idStr, userIDStr, err)
 			http.Error(w, "Failed to update tag", http.StatusInternalServerError)
 		}
 		return
 	}
 
 	if result.MatchedCount == 0 {
-		http.Error(w, "Tag not found", http.StatusNotFound)
+		http.Error(w, "Tag not found or unauthorized", http.StatusNotFound)
 		return
 	}
 
 	var updatedTag models.Tag
 	err = collection.FindOne(context.Background(), filter).Decode(&updatedTag)
 	if err != nil {
-		log.Printf("Failed to find updated tag with ID %s: %v", idStr, err)
+		log.Printf("Failed to find updated tag with ID %s for user %s: %v", idStr, userIDStr, err)
 		http.Error(w, "Failed to retrieve the updated tag", http.StatusInternalServerError)
 		return
 	}

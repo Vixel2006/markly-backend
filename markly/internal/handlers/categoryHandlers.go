@@ -45,13 +45,12 @@ func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	category.ID = primitive.NewObjectID()
-	category.UserID = userID // Ensure UserID is set from context
+	category.UserID = userID
 
 	collection := h.db.Client().Database("markly").Collection("categories")
 
-	// --- FIX IS HERE: Use bson.D for ordered keys in compound index ---
 	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, // Corrected to bson.D
+		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 
@@ -62,7 +61,6 @@ func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Duplicate category name: %v", err)
 			return
 		}
-		// This log will now show the actual error if it's not a duplicate key error
 		log.Printf("Failed to create index: %v", err)
 		http.Error(w, "Failed to set up category collection", http.StatusInternalServerError)
 		return
@@ -120,6 +118,48 @@ func (h *CategoryHandler) GetCategories(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(categories)
+}
+
+func (h *CategoryHandler) GetCategoryByID(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	categoryID, err := primitive.ObjectIDFromHex(idStr)
+	if err != nil {
+		http.Error(w, "Invalid category ID format", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": categoryID, "user_id": userID}
+
+	var category models.Category
+	collection := h.db.Client().Database("markly").Collection("categories")
+
+	err = collection.FindOne(context.Background(), filter).Decode(&category)
+	if err == mongo.ErrNoDocuments {
+		http.Error(w, "Category not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("Error finding category by ID %s: %v", idStr, err)
+		http.Error(w, "Failed to retrieve category", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(category)
 }
 
 func (h *CategoryHandler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
@@ -186,10 +226,7 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var updatePayload struct {
-		Name *string `json:"name,omitempty" bson:"name,omitempty"`
-	}
-
+	var updatePayload models.CategoryUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
 		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
@@ -198,6 +235,9 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 	updateFields := bson.M{}
 	if updatePayload.Name != nil {
 		updateFields["name"] = *updatePayload.Name
+	}
+	if updatePayload.Emoji != nil {
+		updateFields["emoji"] = *updatePayload.Emoji
 	}
 
 	if len(updateFields) == 0 {
@@ -212,6 +252,10 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			http.Error(w, "Category name already exists for this user.", http.StatusConflict)
+			return
+		}
 		log.Printf("Failed to update category with ID %s for user %s: %v", idStr, userIDStr, err)
 		http.Error(w, "Failed to update category", http.StatusInternalServerError)
 		return

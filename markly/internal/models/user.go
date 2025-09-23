@@ -3,13 +3,12 @@ package models
 import "go.mongodb.org/mongo-driver/bson/primitive"
 
 type User struct {
-	ID       primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name     string             `bson:"name" json:"name"`
-	Email    string             `bson:"email" json:"email"`
-	Password string             `bson:"password" json:"password"`
+	ID       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	Email    string             `json:"email" bson:"email"`
+	Password string             `json:"-" bson:"password"`
 }
 
-type Login struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+type UserProfileUpdate struct {
+	Email    *string `json:"email,omitempty" bson:"email,omitempty"`
+	Password *string `json:"password,omitempty" bson:"password,omitempty"`
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -19,15 +20,6 @@ import (
 	"markly/internal/models"
 )
 
-type AddBookmarkRequestBody struct {
-	URL         string   `json:"url"`
-	Title       string   `json:"title"`
-	Summary     string   `json:"summary,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Collections []string `json:"collections,omitempty"`
-	Category    *string  `json:"category,omitempty"`
-}
-
 type BookmarkHandler struct {
 	db database.Service
 }
@@ -36,6 +28,7 @@ func NewBookmarksHandler(db database.Service) *BookmarkHandler {
 	return &BookmarkHandler{db: db}
 }
 
+// parseObjectIDs helper function
 func parseObjectIDs(idsStr string) ([]primitive.ObjectID, error) {
 	var objectIDs []primitive.ObjectID
 	if idsStr == "" {
@@ -74,7 +67,6 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid tags ID format. Tags must be comma-separated hexadecimal ObjectIDs.", http.StatusBadRequest)
 			return
 		}
-		// Query on TagsID field
 		filter["tagsid"] = bson.M{"$in": tagsIDs}
 	}
 
@@ -85,7 +77,6 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid category ID format. Category must be a hexadecimal ObjectID.", http.StatusBadRequest)
 			return
 		}
-		// Query on CategoryID field
 		filter["categoryid"] = categoryID
 	}
 
@@ -152,11 +143,14 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var reqBody AddBookmarkRequestBody
+	var reqBody models.AddBookmarkRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Received bookmark request: %+v", reqBody)
 
 	if reqBody.URL == "" || reqBody.Title == "" {
 		http.Error(w, "URL and Title are required", http.StatusBadRequest)
@@ -170,8 +164,12 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	)
 
 	for _, tagIDStr := range reqBody.Tags {
+		if tagIDStr == "" {
+			continue
+		}
 		objID, err := primitive.ObjectIDFromHex(tagIDStr)
 		if err != nil {
+			log.Printf("Invalid tag ID format: %s, error: %v", tagIDStr, err)
 			http.Error(w, "Invalid tag ID format: "+tagIDStr, http.StatusBadRequest)
 			return
 		}
@@ -179,23 +177,32 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, colIDStr := range reqBody.Collections {
+		if colIDStr == "" {
+			continue
+		}
 		objID, err := primitive.ObjectIDFromHex(colIDStr)
 		if err != nil {
+			log.Printf("Invalid collection ID format: %s, error: %v", colIDStr, err)
 			http.Error(w, "Invalid collection ID format: "+colIDStr, http.StatusBadRequest)
 			return
 		}
 		collectionsObjectIDs = append(collectionsObjectIDs, objID)
 	}
 
-	if reqBody.Category != nil && *reqBody.Category != "" {
-		catID, err := primitive.ObjectIDFromHex(*reqBody.Category)
+	if reqBody.CategoryID != nil && *reqBody.CategoryID != "" {
+		catID, err := primitive.ObjectIDFromHex(*reqBody.CategoryID)
 		if err != nil {
-			http.Error(w, "Invalid category ID format: "+*reqBody.Category, http.StatusBadRequest)
+			log.Printf("Invalid category ID format: %s, error: %v", *reqBody.CategoryID, err)
+			http.Error(w, "Invalid category ID format: "+*reqBody.CategoryID, http.StatusBadRequest)
 			return
 		}
 		categoryObjectIDPtr = &catID
-	} else {
-		categoryObjectIDPtr = nil
+	}
+
+	if err := h.validateReferences(userID, tagsObjectIDs, collectionsObjectIDs, categoryObjectIDPtr); err != nil {
+		log.Printf("Reference validation failed: %v", err)
+		http.Error(w, "Invalid reference: "+err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	bm := models.Bookmark{
@@ -208,20 +215,76 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		TagsID:        tagsObjectIDs,
 		CollectionsID: collectionsObjectIDs,
 		CategoryID:    categoryObjectIDPtr,
-		IsFav:         false,
+		IsFav:         reqBody.IsFav,
 	}
 
+	log.Printf("Creating bookmark: %+v", bm)
+
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
-	_, err = collection.InsertOne(context.Background(), bm)
+	result, err := collection.InsertOne(context.Background(), bm)
 	if err != nil {
 		log.Printf("Error inserting bookmark: %v", err)
 		http.Error(w, "Failed to add bookmark", http.StatusInternalServerError)
 		return
 	}
 
+	bm.ID = result.InsertedID.(primitive.ObjectID)
+
+	log.Printf("Successfully created bookmark with ID: %s", bm.ID.Hex())
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(bm)
+}
+
+func (h *BookmarkHandler) validateReferences(userID primitive.ObjectID, tagIDs []primitive.ObjectID, collectionIDs []primitive.ObjectID, categoryID *primitive.ObjectID) error {
+	ctx := context.Background()
+
+	// Validate tags
+	if len(tagIDs) > 0 {
+		tagsCollection := h.db.Client().Database("markly").Collection("tags")
+		count, err := tagsCollection.CountDocuments(ctx, bson.M{
+			"_id":     bson.M{"$in": tagIDs},
+			"user_id": userID,
+		})
+		if err != nil {
+			return err
+		}
+		if count != int64(len(tagIDs)) {
+			return errors.New("one or more tags not found or do not belong to user")
+		}
+	}
+
+	if len(collectionIDs) > 0 {
+		collectionsCollection := h.db.Client().Database("markly").Collection("collections")
+		count, err := collectionsCollection.CountDocuments(ctx, bson.M{
+			"_id":     bson.M{"$in": collectionIDs},
+			"user_id": userID,
+		})
+		if err != nil {
+			return err
+		}
+		if count != int64(len(collectionIDs)) {
+			return errors.New("one or more collections not found or do not belong to user")
+		}
+	}
+
+	// Validate category
+	if categoryID != nil {
+		categoriesCollection := h.db.Client().Database("markly").Collection("categories")
+		count, err := categoriesCollection.CountDocuments(ctx, bson.M{
+			"_id":     *categoryID,
+			"user_id": userID,
+		})
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return errors.New("category not found or does not belong to user")
+		}
+	}
+
+	return nil
 }
 
 func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +366,7 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent) // 204 No Content for successful deletion
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
@@ -328,38 +391,54 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var nbm models.BookmarkUpdate
-	if err := json.NewDecoder(r.Body).Decode(&nbm); err != nil {
+	var updatePayload models.BookmarkUpdate
+	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	updateFields := bson.M{}
 
-	if nbm.URL != nil {
-		updateFields["url"] = *nbm.URL
+	if updatePayload.URL != nil {
+		updateFields["url"] = *updatePayload.URL
 	}
-	if nbm.Title != nil {
-		updateFields["title"] = *nbm.Title
+	if updatePayload.Title != nil {
+		updateFields["title"] = *updatePayload.Title
 	}
-	if nbm.Summary != nil {
-		updateFields["summary"] = *nbm.Summary
+	if updatePayload.Summary != nil {
+		updateFields["summary"] = *updatePayload.Summary
 	}
-	if nbm.TagsID != nil {
-		updateFields["tags"] = *nbm.TagsID
+
+	if updatePayload.TagsID != nil {
+		if err := h.validateReferences(userID, *updatePayload.TagsID, nil, nil); err != nil {
+			http.Error(w, "Invalid tag reference: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		updateFields["tagsid"] = *updatePayload.TagsID
 	}
-	if nbm.CollectionsID != nil {
-		updateFields["collections"] = *nbm.CollectionsID
+
+	if updatePayload.CollectionsID != nil {
+		if err := h.validateReferences(userID, nil, *updatePayload.CollectionsID, nil); err != nil {
+			http.Error(w, "Invalid collection reference: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		updateFields["collectionsid"] = *updatePayload.CollectionsID
 	}
-	if nbm.CategoryID != nil {
-		if (*nbm.CategoryID).IsZero() {
-			updateFields["category"] = primitive.Null{}
+
+	if updatePayload.CategoryID != nil {
+		if (*updatePayload.CategoryID).IsZero() {
+			updateFields["categoryid"] = nil
 		} else {
-			updateFields["category"] = *nbm.CategoryID
+			if err := h.validateReferences(userID, nil, nil, updatePayload.CategoryID); err != nil {
+				http.Error(w, "Invalid category reference: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			updateFields["categoryid"] = *updatePayload.CategoryID
 		}
 	}
-	if nbm.IsFav != nil {
-		updateFields["is_fav"] = *nbm.IsFav
+
+	if updatePayload.IsFav != nil {
+		updateFields["is_fav"] = *updatePayload.IsFav
 	}
 
 	if len(updateFields) == 0 {

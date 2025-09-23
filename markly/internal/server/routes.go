@@ -14,14 +14,12 @@ import (
 func (s *Server) RegisterRoutes() http.Handler {
 	r := mux.NewRouter()
 
-	// Apply CORS middleware
 	r.Use(s.corsMiddleware)
 
 	r.HandleFunc("/", s.HelloWorldHandler)
 
 	r.HandleFunc("/health", s.healthHandler)
 
-	// Register the User Auth and Bookmark Api
 	s.registerBookmarkRoutes(r)
 	s.registerAuthRoutes(r)
 	s.registerTagRoutes(r)
@@ -31,14 +29,12 @@ func (s *Server) RegisterRoutes() http.Handler {
 	return r
 }
 
-// CORS middleware
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// CORS Headers
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // Wildcard allows all origins
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Credentials", "true") // Credentials not allowed with wildcard origins
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		// Handle preflight OPTIONS requests
 		if r.Method == http.MethodOptions {
@@ -88,14 +84,17 @@ func (s *Server) registerAuthRoutes(r *mux.Router) {
 	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")
 	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.GetMyProfile))).Methods("GET", "OPTIONS")
+	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.UpdateMyProfile))).Methods("PATCH", "PUT", "OPTIONS")
+	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.DeleteMyProfile))).Methods("DELETE", "OPTIONS")
 }
-
 
 func (s *Server) registerCategoryRoutes(r *mux.Router) {
 	ch := handlers.NewCategoryHandler(s.db)
 	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.AddCategory))).Methods("POST", "OPTIONS")
 	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.GetCategories))).Methods("GET", "OPTIONS")
+	r.Handle("/api/categories/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ch.GetCategoryByID))).Methods("GET", "OPTIONS")
 	r.Handle("/api/categories/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ch.DeleteCategory))).Methods("DELETE", "OPTIONS")
+	r.Handle("/api/categories/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ch.UpdateCategory))).Methods("PUT", "OPTIONS")
 }
 
 func (s *Server) registerCollectionRoutes(r *mux.Router) {
@@ -104,11 +103,14 @@ func (s *Server) registerCollectionRoutes(r *mux.Router) {
 	r.Handle("/api/collections", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollections))).Methods("GET", "OPTIONS")
 	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollection))).Methods("GET", "OPTIONS")
 	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.DeleteCollection))).Methods("DELETE", "OPTIONS")
+	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.UpdateCollection))).Methods("PUT", "OPTIONS")
 }
 
 func (s *Server) registerTagRoutes(r *mux.Router) {
 	th := handlers.NewTagHandler(s.db)
 	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.AddTag))).Methods("POST", "OPTIONS")
 	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.GetTagsByID))).Methods("GET", "OPTIONS")
+	r.Handle("/api/tags/user", middlewares.AuthMiddleware(http.HandlerFunc(th.GetUserTags))).Methods("GET", "OPTIONS")
+	r.Handle("/api/tags/{id}", middlewares.AuthMiddleware(http.HandlerFunc(th.DeleteTag))).Methods("DELETE", "OPTIONS")
+	r.Handle("/api/tags/{id}", middlewares.AuthMiddleware(http.HandlerFunc(th.UpdateTag))).Methods("PUT", "OPTIONS")
 }
-

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -31,12 +32,16 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, "Invalid user data input", http.StatusBadRequest)
+		http.Error(w, "Invalid user data input: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if user.Username == "" || user.Email == "" || user.Password == "" {
+		http.Error(w, "Username, email, and password are required", http.StatusBadRequest)
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 8)
-
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
@@ -51,11 +56,14 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Keys:    bson.M{"email": 1},
 		Options: options.Index().SetUnique(true),
 	}
-
 	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
 	if err != nil {
-		http.Error(w, "Failed to create index", http.StatusInternalServerError)
-		return
+		// Check if it's a duplicate key error using strings.Contains
+		if !strings.Contains(err.Error(), "E11000 duplicate key error collection") {
+			log.Printf("Error creating unique email index: %v", err)
+			http.Error(w, "Failed to set up database index", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	_, err = collection.InsertOne(context.Background(), user)
@@ -64,9 +72,11 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Email already exists", http.StatusConflict)
 			return
 		}
+		log.Printf("Failed to insert user into database: %v", err)
 		http.Error(w, "Failed to create user", http.StatusInternalServerError)
 		return
 	}
+
 	user.Password = ""
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -77,7 +87,7 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var creds models.Login
 
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -86,18 +96,23 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	err := collection.FindOne(context.Background(), bson.M{"email": creds.Email}).Decode(&user)
 	if err != nil {
-		http.Error(w, "Email not found", http.StatusUnauthorized)
+		if err == mongo.ErrNoDocuments {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("Error finding user for login: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password)); err != nil {
-		http.Error(w, "Incorrect Password", http.StatusUnauthorized)
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
 	token, err := utils.GenerateJWT(user.ID)
-
 	if err != nil {
+		log.Printf("Could not generate token for user %s: %v", user.ID.Hex(), err)
 		http.Error(w, "Could not generate token", http.StatusInternalServerError)
 		return
 	}
@@ -115,7 +130,7 @@ func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusInternalServerError)
+		http.Error(w, "Invalid user ID format in context", http.StatusInternalServerError)
 		return
 	}
 
@@ -132,6 +147,7 @@ func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
+		log.Printf("Failed to fetch user profile for %s: %v", userIDStr, err)
 		http.Error(w, "Failed to fetch user profile", http.StatusInternalServerError)
 		return
 	}
@@ -162,21 +178,34 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updateFields := bson.M{}
+	if updatePayload.Username != "" {
+		updateFields["username"] = updatePayload.Username
+	}
 	if updatePayload.Email != nil {
-		var existingUser models.User
-		err := u.db.Client().Database("markly").Collection("users").
-			FindOne(context.Background(), bson.M{"email": *updatePayload.Email, "_id": bson.M{"$ne": userID}}).Decode(&existingUser)
-		if err == nil { // Found a user with the new email that isn't the current user
-			http.Error(w, "Email already in use by another account.", http.StatusConflict)
+		var currentUser models.User
+		err := u.db.Client().Database("markly").Collection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&currentUser)
+		if err != nil {
+			log.Printf("Error fetching current user for email update check: %v", err)
+			http.Error(w, "Failed to verify current user data", http.StatusInternalServerError)
 			return
-		} else if err != mongo.ErrNoDocuments {
-			log.Printf("Error checking for duplicate email: %v", err)
-			http.Error(w, "Failed to check email availability.", http.StatusInternalServerError)
-			return
+		}
+
+		if currentUser.Email != *updatePayload.Email {
+			var existingUser models.User
+			err := u.db.Client().Database("markly").Collection("users").
+				FindOne(context.Background(), bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
+			if err == nil {
+				http.Error(w, "Email already in use by another account.", http.StatusConflict)
+				return
+			} else if err != mongo.ErrNoDocuments {
+				log.Printf("Error checking for duplicate email: %v", err)
+				http.Error(w, "Failed to check email availability.", http.StatusInternalServerError)
+				return
+			}
 		}
 		updateFields["email"] = *updatePayload.Email
 	}
-	if updatePayload.Password != nil {
+	if updatePayload.Password != nil && *updatePayload.Password != "" {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updatePayload.Password), 8)
 		if err != nil {
 			http.Error(w, "Failed to hash new password", http.StatusInternalServerError)

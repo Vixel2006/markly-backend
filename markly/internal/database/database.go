@@ -56,4 +56,3 @@ func (s *service) Health() map[string]string {
 func (s *service) Client() *mongo.Client {
 	return s.db
 }
-

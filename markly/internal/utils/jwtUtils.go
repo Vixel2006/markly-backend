@@ -1,12 +1,11 @@
 package utils
 
 import (
-	"log"
-	"time"
 	"github.com/golang-jwt/jwt/v5"
-	"os"
-  "github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"log"
+	"os"
+	"time"
 )
 
 type Claims struct {
@@ -16,13 +15,8 @@ type Claims struct {
 
 // Generate JWT
 func GenerateJWT(id primitive.ObjectID) (string, error) {
-	err := godotenv.Load()
-
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	jwtKey := []byte(os.Getenv("JWT_SECRET"))
+	log.Printf("jwtUtils: jwtKey length: %d", len(jwtKey))
 
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{

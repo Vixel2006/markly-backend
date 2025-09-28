@@ -2,22 +2,32 @@ package middlewares
 
 import (
 	"context"
+	"github.com/golang-jwt/jwt/v5"
+	"log"
+	"markly/internal/utils"
 	"net/http"
 	"os"
-	"github.com/golang-jwt/jwt/v5"
-	"markly/internal/utils"
+	"strings"
 )
 
 var jwtKey = []byte(os.Getenv("JWT_SECRET"))
 
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("jwtMiddleware: jwtKey length: %d", len(jwtKey))
 		tokenString := r.Header.Get("Authorization")
 
 		if tokenString == "" {
 			http.Error(w, "Missing token", http.StatusUnauthorized)
 			return
 		}
+
+		// Extract the token from the "Bearer <token>" format
+		if !strings.HasPrefix(tokenString, "Bearer ") {
+			http.Error(w, "Invalid token format", http.StatusUnauthorized)
+			return
+		}
+		tokenString = tokenString[len("Bearer "):]
 
 		claims := &utils.Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
@@ -33,4 +43,3 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
-

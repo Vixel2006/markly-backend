@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	_ "github.com/joho/godotenv/autoload" // Import godotenv/autoload
 	"markly/internal/server"
 )
 
@@ -38,6 +40,7 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
+	log.Printf("JWT_SECRET from main.go: %s", os.Getenv("JWT_SECRET"))
 
 	server := server.NewServer()
 

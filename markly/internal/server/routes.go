@@ -25,6 +25,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	s.registerTagRoutes(r)
 	s.registerCollectionRoutes(r)
 	s.registerCategoryRoutes(r)
+	s.registerAgentRoutes(r)
 
 	return r
 }
@@ -113,4 +114,9 @@ func (s *Server) registerTagRoutes(r *mux.Router) {
 	r.Handle("/api/tags/user", middlewares.AuthMiddleware(http.HandlerFunc(th.GetUserTags))).Methods("GET", "OPTIONS")
 	r.Handle("/api/tags/{id}", middlewares.AuthMiddleware(http.HandlerFunc(th.DeleteTag))).Methods("DELETE", "OPTIONS")
 	r.Handle("/api/tags/{id}", middlewares.AuthMiddleware(http.HandlerFunc(th.UpdateTag))).Methods("PUT", "OPTIONS")
+}
+
+func (s *Server) registerAgentRoutes(r *mux.Router) {
+	ah := handlers.NewAgentHandler(s.db)
+	r.Handle("/api/agent/summarize/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ah.GenerateSummary))).Methods("POST", "OPTIONS")
 }

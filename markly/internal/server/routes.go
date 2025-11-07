@@ -20,12 +20,15 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	r.HandleFunc("/health", s.healthHandler)
 
+
+
 	s.registerBookmarkRoutes(r)
 	s.registerAuthRoutes(r)
 	s.registerTagRoutes(r)
 	s.registerCollectionRoutes(r)
 	s.registerCategoryRoutes(r)
 	s.registerAgentRoutes(r)
+
 
 	return r
 }
@@ -119,4 +122,8 @@ func (s *Server) registerTagRoutes(r *mux.Router) {
 func (s *Server) registerAgentRoutes(r *mux.Router) {
 	ah := handlers.NewAgentHandler(s.db)
 	r.Handle("/api/agent/summarize/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ah.GenerateSummary))).Methods("POST", "OPTIONS")
+	r.Handle("/api/agent/summarize-url", middlewares.AuthMiddleware(http.HandlerFunc(ah.SummarizeURL))).Methods("POST", "OPTIONS")
+	r.Handle("/api/agent/suggestions", middlewares.AuthMiddleware(http.HandlerFunc(ah.GenerateAISuggestions))).Methods("GET", "OPTIONS")
 }
+
+

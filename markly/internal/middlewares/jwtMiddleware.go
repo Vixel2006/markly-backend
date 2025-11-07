@@ -10,10 +10,14 @@ import (
 	"strings"
 )
 
-var jwtKey = []byte(os.Getenv("JWT_SECRET"))
-
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwtKey := []byte(os.Getenv("JWT_SECRET"))
+		if len(jwtKey) == 0 {
+			log.Println("JWT_SECRET is not set in environment. Authentication will fail.")
+			http.Error(w, "Server configuration error: JWT secret missing", http.StatusInternalServerError)
+			return
+		}
 		log.Printf("jwtMiddleware: jwtKey length: %d", len(jwtKey))
 		tokenString := r.Header.Get("Authorization")
 

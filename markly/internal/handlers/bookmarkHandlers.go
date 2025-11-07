@@ -391,7 +391,7 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var updatePayload models.BookmarkUpdate
+	var updatePayload models.UpdateBookmarkRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
@@ -409,32 +409,69 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 		updateFields["summary"] = *updatePayload.Summary
 	}
 
-	if updatePayload.TagsID != nil {
-		if err := h.validateReferences(userID, *updatePayload.TagsID, nil, nil); err != nil {
+	// Handle Tags
+	if updatePayload.Tags != nil {
+		var tagsObjectIDs []primitive.ObjectID
+		for _, tagIDStr := range *updatePayload.Tags {
+			if tagIDStr == "" {
+				continue
+			}
+			objID, err := primitive.ObjectIDFromHex(tagIDStr)
+			if err != nil {
+				http.Error(w, "Invalid tag ID format: "+tagIDStr, http.StatusBadRequest)
+				return
+			}
+			tagsObjectIDs = append(tagsObjectIDs, objID)
+		}
+		if err := h.validateReferences(userID, tagsObjectIDs, nil, nil); err != nil {
 			http.Error(w, "Invalid tag reference: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		updateFields["tagsid"] = *updatePayload.TagsID
+		updateFields["tagsid"] = tagsObjectIDs
 	}
 
-	if updatePayload.CollectionsID != nil {
-		if err := h.validateReferences(userID, nil, *updatePayload.CollectionsID, nil); err != nil {
+	// Handle Collections
+	if updatePayload.Collections != nil {
+		var collectionsObjectIDs []primitive.ObjectID
+		for _, colIDStr := range *updatePayload.Collections {
+			if colIDStr == "" {
+				continue
+			}
+			objID, err := primitive.ObjectIDFromHex(colIDStr)
+			if err != nil {
+				http.Error(w, "Invalid collection ID format: "+colIDStr, http.StatusBadRequest)
+				return
+			}
+			collectionsObjectIDs = append(collectionsObjectIDs, objID)
+		}
+		if err := h.validateReferences(userID, nil, collectionsObjectIDs, nil); err != nil {
 			http.Error(w, "Invalid collection reference: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		updateFields["collectionsid"] = *updatePayload.CollectionsID
+		updateFields["collectionsid"] = collectionsObjectIDs
 	}
 
+	// Handle CategoryID
 	if updatePayload.CategoryID != nil {
-		if (*updatePayload.CategoryID).IsZero() {
-			updateFields["categoryid"] = nil
+		var categoryObjectIDPtr *primitive.ObjectID
+		if *updatePayload.CategoryID == "" {
+			// Frontend explicitly sent an empty string, meaning clear the category
+			categoryObjectIDPtr = nil
 		} else {
-			if err := h.validateReferences(userID, nil, nil, updatePayload.CategoryID); err != nil {
-				http.Error(w, "Invalid category reference: "+err.Error(), http.StatusBadRequest)
+			// Attempt to convert the string to ObjectID
+			objID, err := primitive.ObjectIDFromHex(*updatePayload.CategoryID)
+			if err != nil {
+				http.Error(w, "Invalid category ID format: "+err.Error(), http.StatusBadRequest)
 				return
 			}
-			updateFields["categoryid"] = *updatePayload.CategoryID
+			categoryObjectIDPtr = &objID
 		}
+
+		if err := h.validateReferences(userID, nil, nil, categoryObjectIDPtr); err != nil {
+			http.Error(w, "Invalid category reference: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		updateFields["categoryid"] = categoryObjectIDPtr
 	}
 
 	if updatePayload.IsFav != nil {

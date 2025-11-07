@@ -87,7 +87,7 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var creds models.Login
 
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -97,28 +97,27 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	err := collection.FindOne(context.Background(), bson.M{"email": creds.Email}).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			utils.RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
 		log.Printf("Error finding user for login: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password)); err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	token, err := utils.GenerateJWT(user.ID)
 	if err != nil {
 		log.Printf("Could not generate token for user %s: %v", user.ID.Hex(), err)
-		http.Error(w, "Could not generate token", http.StatusInternalServerError)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Could not generate token")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {

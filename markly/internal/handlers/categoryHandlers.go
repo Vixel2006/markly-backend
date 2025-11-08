@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/gorilla/mux"
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -15,6 +14,7 @@ import (
 
 	"markly/internal/database"
 	"markly/internal/models"
+	"markly/internal/utils"
 )
 
 type CategoryHandler struct {
@@ -26,21 +26,14 @@ func NewCategoryHandler(db database.Service) *CategoryHandler {
 }
 
 func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value("userID").(string)
-	if !ok {
-		http.Error(w, "Invalid user ID.", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	userID, err := utils.GetUserIDFromContext(w, r)
 	if err != nil {
-		http.Error(w, "Invalid user ID format.", http.StatusUnauthorized)
 		return
 	}
 
 	var category models.Category
 	if err := json.NewDecoder(r.Body).Decode(&category); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		utils.SendJSONError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -57,12 +50,12 @@ func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			http.Error(w, "Category name already exists for this user.", http.StatusConflict)
+			utils.SendJSONError(w, "Category name already exists for this user.", http.StatusConflict)
 			log.Printf("Duplicate category name: %v", err)
 			return
 		}
 		log.Printf("Failed to create index: %v", err)
-		http.Error(w, "Failed to set up category collection", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Failed to set up category collection", http.StatusInternalServerError)
 		return
 	}
 
@@ -70,29 +63,20 @@ func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Println("Category name already exists for this user.")
-			http.Error(w, "Category name already exists for this user.", http.StatusConflict)
+			utils.SendJSONError(w, "Category name already exists for this user.", http.StatusConflict)
 		} else {
 			log.Printf("Failed to insert category: %v", err)
-			http.Error(w, "Failed to insert category", http.StatusInternalServerError)
+			utils.SendJSONError(w, "Failed to insert category", http.StatusInternalServerError)
 		}
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(category)
+	utils.RespondWithJSON(w, http.StatusCreated, category)
 }
 
 func (h *CategoryHandler) GetCategories(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value("userID").(string)
-	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	userID, err := utils.GetUserIDFromContext(w, r)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
 		return
 	}
 
@@ -105,40 +89,28 @@ func (h *CategoryHandler) GetCategories(w http.ResponseWriter, r *http.Request) 
 	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
 		log.Printf("Error finding categories: %v", err)
-		http.Error(w, "Error fetching categories", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Error fetching categories", http.StatusInternalServerError)
 		return
 	}
 	defer cursor.Close(context.Background())
 
 	if err := cursor.All(context.Background(), &categories); err != nil {
 		log.Printf("Error decoding categories: %v", err)
-		http.Error(w, "Error decoding categories", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Error decoding categories", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(categories)
+	utils.RespondWithJSON(w, http.StatusOK, categories)
 }
 
 func (h *CategoryHandler) GetCategoryByID(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value("userID").(string)
-	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
 		return
 	}
 
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	categoryID, err := utils.GetObjectIDFromVars(w, r, "id")
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
-		return
-	}
-
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-
-	categoryID, err := primitive.ObjectIDFromHex(idStr)
-	if err != nil {
-		http.Error(w, "Invalid category ID format", http.StatusBadRequest)
 		return
 	}
 
@@ -149,38 +121,26 @@ func (h *CategoryHandler) GetCategoryByID(w http.ResponseWriter, r *http.Request
 
 	err = collection.FindOne(context.Background(), filter).Decode(&category)
 	if err == mongo.ErrNoDocuments {
-		http.Error(w, "Category not found", http.StatusNotFound)
+		utils.SendJSONError(w, "Category not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		log.Printf("Error finding category by ID %s: %v", idStr, err)
-		http.Error(w, "Failed to retrieve category", http.StatusInternalServerError)
+		log.Printf("Error finding category by ID %s: %v", categoryID.Hex(), err)
+		utils.SendJSONError(w, "Failed to retrieve category", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(category)
+	utils.RespondWithJSON(w, http.StatusOK, category)
 }
 
 func (h *CategoryHandler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value("userID").(string)
-	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
 		return
 	}
 
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	categoryID, err := utils.GetObjectIDFromVars(w, r, "id")
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
-		return
-	}
-
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-
-	categoryID, err := primitive.ObjectIDFromHex(idStr)
-	if err != nil {
-		http.Error(w, "Invalid category ID format", http.StatusBadRequest)
 		return
 	}
 
@@ -190,45 +150,33 @@ func (h *CategoryHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 
 	deleteResult, err := collection.DeleteOne(context.Background(), filter)
 	if err != nil {
-		log.Printf("Failed to delete category with ID %s for user %s: %v", idStr, userIDStr, err)
-		http.Error(w, "Failed to delete category", http.StatusInternalServerError)
+		log.Printf("Failed to delete category with ID %s for user %s: %v", categoryID.Hex(), userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to delete category", http.StatusInternalServerError)
 		return
 	}
 
 	if deleteResult.DeletedCount == 0 {
-		http.Error(w, "Category not found or unauthorized", http.StatusNotFound)
+		utils.SendJSONError(w, "Category not found or unauthorized", http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bson.M{"message": "Category deleted successfully", "deleted_count": deleteResult.DeletedCount})
+	utils.RespondWithJSON(w, http.StatusOK, bson.M{"message": "Category deleted successfully", "deleted_count": deleteResult.DeletedCount})
 }
 
 func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value("userID").(string)
-	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
 		return
 	}
 
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	categoryID, err := utils.GetObjectIDFromVars(w, r, "id")
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
-		return
-	}
-
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-
-	categoryID, err := primitive.ObjectIDFromHex(idStr)
-	if err != nil {
-		http.Error(w, "Invalid category ID format", http.StatusBadRequest)
 		return
 	}
 
 	var updatePayload models.CategoryUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
-		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
+		utils.SendJSONError(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -241,7 +189,7 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 	}
 
 	if len(updateFields) == 0 {
-		http.Error(w, "No fields to update", http.StatusBadRequest)
+		utils.SendJSONError(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
 
@@ -253,27 +201,26 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			http.Error(w, "Category name already exists for this user.", http.StatusConflict)
+			utils.SendJSONError(w, "Category name already exists for this user.", http.StatusConflict)
 			return
 		}
-		log.Printf("Failed to update category with ID %s for user %s: %v", idStr, userIDStr, err)
-		http.Error(w, "Failed to update category", http.StatusInternalServerError)
+		log.Printf("Failed to update category with ID %s for user %s: %v", categoryID.Hex(), userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to update category", http.StatusInternalServerError)
 		return
 	}
 
 	if result.MatchedCount == 0 {
-		http.Error(w, "Category not found or unauthorized to update", http.StatusNotFound)
+		utils.SendJSONError(w, "Category not found or unauthorized to update", http.StatusNotFound)
 		return
 	}
 
 	var updatedCategory models.Category
 	err = collection.FindOne(context.Background(), filter).Decode(&updatedCategory)
 	if err != nil {
-		log.Printf("Failed to find updated category with ID %s for user %s: %v", idStr, userIDStr, err)
-		http.Error(w, "Failed to retrieve the updated category", http.StatusInternalServerError)
+		log.Printf("Failed to find updated category with ID %s for user %s: %v", categoryID.Hex(), userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to retrieve the updated category", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updatedCategory)
+	utils.RespondWithJSON(w, http.StatusOK, updatedCategory)
 }

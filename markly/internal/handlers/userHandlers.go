@@ -32,18 +32,18 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, "Invalid user data input: "+err.Error(), http.StatusBadRequest)
+		utils.SendJSONError(w, "Invalid user data input: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if user.Username == "" || user.Email == "" || user.Password == "" {
-		http.Error(w, "Username, email, and password are required", http.StatusBadRequest)
+		utils.SendJSONError(w, "Username, email, and password are required", http.StatusBadRequest)
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 8)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		// Check if it's a duplicate key error using strings.Contains
 		if !strings.Contains(err.Error(), "E11000 duplicate key error collection") {
 			log.Printf("Error creating unique email index: %v", err)
-			http.Error(w, "Failed to set up database index", http.StatusInternalServerError)
+			utils.SendJSONError(w, "Failed to set up database index", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -69,18 +69,16 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.InsertOne(context.Background(), user)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			http.Error(w, "Email already exists", http.StatusConflict)
+			utils.SendJSONError(w, "Email already exists", http.StatusConflict)
 			return
 		}
 		log.Printf("Failed to insert user into database: %v", err)
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Failed to create user", http.StatusInternalServerError)
 		return
 	}
 
 	user.Password = ""
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	utils.RespondWithJSON(w, http.StatusCreated, user)
 }
 
 func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -123,13 +121,13 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value("userID").(string)
 	if !ok {
-		http.Error(w, "User ID not found in context", http.StatusInternalServerError)
+		utils.SendJSONError(w, "User ID not found in context", http.StatusInternalServerError)
 		return
 	}
 
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format in context", http.StatusInternalServerError)
+		utils.SendJSONError(w, "Invalid user ID format in context", http.StatusInternalServerError)
 		return
 	}
 
@@ -143,36 +141,35 @@ func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 	err = collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			http.Error(w, "User not found", http.StatusNotFound)
+			utils.SendJSONError(w, "User not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to fetch user profile for %s: %v", userIDStr, err)
-		http.Error(w, "Failed to fetch user profile", http.StatusInternalServerError)
+		log.Printf("Failed to fetch user profile for %s: %v", userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to fetch user profile", http.StatusInternalServerError)
 		return
 	}
 
 	user.Password = ""
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	utils.RespondWithJSON(w, http.StatusOK, user)
 }
 
 func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value("userID").(string)
 	if !ok {
-		http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+		utils.SendJSONError(w, "User ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		utils.SendJSONError(w, "Invalid user ID format", http.StatusUnauthorized)
 		return
 	}
 
 	var updatePayload models.UserProfileUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
-		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
+		utils.SendJSONError(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -185,7 +182,7 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 		err := u.db.Client().Database("markly").Collection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&currentUser)
 		if err != nil {
 			log.Printf("Error fetching current user for email update check: %v", err)
-			http.Error(w, "Failed to verify current user data", http.StatusInternalServerError)
+			utils.SendJSONError(w, "Failed to verify current user data", http.StatusInternalServerError)
 			return
 		}
 
@@ -194,11 +191,11 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 			err := u.db.Client().Database("markly").Collection("users").
 				FindOne(context.Background(), bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
 			if err == nil {
-				http.Error(w, "Email already in use by another account.", http.StatusConflict)
+				utils.SendJSONError(w, "Email already in use by another account.", http.StatusConflict)
 				return
 			} else if err != mongo.ErrNoDocuments {
 				log.Printf("Error checking for duplicate email: %v", err)
-				http.Error(w, "Failed to check email availability.", http.StatusInternalServerError)
+				utils.SendJSONError(w, "Failed to check email availability.", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -207,14 +204,14 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	if updatePayload.Password != nil && *updatePayload.Password != "" {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updatePayload.Password), 8)
 		if err != nil {
-			http.Error(w, "Failed to hash new password", http.StatusInternalServerError)
+			utils.SendJSONError(w, "Failed to hash new password", http.StatusInternalServerError)
 			return
 		}
 		updateFields["password"] = string(hashedPassword)
 	}
 
 	if len(updateFields) == 0 {
-		http.Error(w, "No valid fields provided for update", http.StatusBadRequest)
+		utils.SendJSONError(w, "No valid fields provided for update", http.StatusBadRequest)
 		return
 	}
 
@@ -224,39 +221,38 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	collection := u.db.Client().Database("markly").Collection("users")
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		log.Printf("Error updating user profile %s: %v", userIDStr, err)
-		http.Error(w, "Failed to update user profile", http.StatusInternalServerError)
+		log.Printf("Error updating user profile %s: %v", userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to update user profile", http.StatusInternalServerError)
 		return
 	}
 
 	if result.MatchedCount == 0 {
-		http.Error(w, "User not found or not authorized to update", http.StatusNotFound)
+		utils.SendJSONError(w, "User not found or not authorized to update", http.StatusNotFound)
 		return
 	}
 
 	var updatedUser models.User
 	err = collection.FindOne(context.Background(), filter).Decode(&updatedUser)
 	if err != nil {
-		log.Printf("Error fetching updated user profile %s: %v", userIDStr, err)
-		http.Error(w, "Failed to retrieve updated user profile", http.StatusInternalServerError)
+		log.Printf("Error fetching updated user profile %s: %v", userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to retrieve updated user profile", http.StatusInternalServerError)
 		return
 	}
 	updatedUser.Password = ""
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updatedUser)
+	utils.RespondWithJSON(w, http.StatusOK, updatedUser)
 }
 
 func (u *UserHandler) DeleteMyProfile(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value("userID").(string)
 	if !ok {
-		http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+		utils.SendJSONError(w, "User ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusUnauthorized)
+		utils.SendJSONError(w, "Invalid user ID format", http.StatusUnauthorized)
 		return
 	}
 
@@ -265,13 +261,13 @@ func (u *UserHandler) DeleteMyProfile(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"_id": userID}
 	deleteResult, err := collection.DeleteOne(context.Background(), filter)
 	if err != nil {
-		log.Printf("Error deleting user account %s: %v", userIDStr, err)
-		http.Error(w, "Failed to delete account", http.StatusInternalServerError)
+		log.Printf("Error deleting user account %s: %v", userID.Hex(), err)
+		utils.SendJSONError(w, "Failed to delete account", http.StatusInternalServerError)
 		return
 	}
 
 	if deleteResult.DeletedCount == 0 {
-		http.Error(w, "User account not found or not authorized to delete", http.StatusNotFound)
+		utils.SendJSONError(w, "User account not found or not authorized to delete", http.StatusNotFound)
 		return
 	}
 

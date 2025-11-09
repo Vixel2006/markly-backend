@@ -12,12 +12,11 @@ type AISuggestion struct {
 	URL        string   `json:"url"`
 	Title      string   `json:"title"`
 	Summary    string   `json:"summary"`
-	Category   string   `json:"category"` // Category name
-	Collection string   `json:"collection"` // Collection name
-	Tags       []string `json:"tags"`       // Array of tag names
+	Category   string   `json:"category"`
+	Collection string   `json:"collection"`
+	Tags       []string `json:"tags"`
 }
 
-// PromptBookmarkInfo is a temporary struct to hold bookmark data with resolved names for LLM prompting
 type PromptBookmarkInfo struct {
 	URL        string   `json:"url"`
 	Title      string   `json:"title"`

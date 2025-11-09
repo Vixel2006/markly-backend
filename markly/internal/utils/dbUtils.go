@@ -3,12 +3,15 @@ package utils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"markly/internal/database"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // parseObjectIDs helper function to parse comma-separated ObjectID strings
@@ -77,5 +80,23 @@ func ValidateReferences(db database.Service, userID primitive.ObjectID, tagIDs [
 		}
 	}
 
+	return nil
+}
+
+// CreateUniqueIndex creates a unique index on the specified collection and keys.
+// It returns an error if the index creation fails, including a specific error for duplicate keys.
+func CreateUniqueIndex(collection *mongo.Collection, keys interface{}, fieldName string) error {
+	indexModel := mongo.IndexModel{
+		Keys:    keys,
+		Options: options.Index().SetUnique(true),
+	}
+
+	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("%s already exists", fieldName)
+		}
+		return fmt.Errorf("failed to create index for %s: %w", fieldName, err)
+	}
 	return nil
 }

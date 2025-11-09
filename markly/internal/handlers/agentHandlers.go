@@ -14,6 +14,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type AgentHandler struct {
@@ -22,6 +23,28 @@ type AgentHandler struct {
 
 func NewAgentHandler(db database.Service) *AgentHandler {
 	return &AgentHandler{db: db}
+}
+
+func (a *AgentHandler) getBookmarkForSummary(userID, bookmarkID primitive.ObjectID) (*models.Bookmark, error) {
+	var bookmark models.Bookmark
+	filter := bson.M{"_id": bookmarkID, "user_id": userID}
+	err := a.db.Client().Database("markly").
+		Collection("bookmarks").
+		FindOne(context.Background(), filter).
+		Decode(&bookmark)
+	if err != nil {
+		return nil, err
+	}
+	return &bookmark, nil
+}
+
+func (a *AgentHandler) updateBookmarkSummary(bookmarkID primitive.ObjectID, userID primitive.ObjectID, summary string) error {
+	filter := bson.M{"_id": bookmarkID, "user_id": userID}
+	update := bson.M{"$set": bson.M{"summary": summary}}
+	_, err := a.db.Client().Database("markly").
+		Collection("bookmarks").
+		UpdateOne(context.Background(), filter, update)
+	return err
 }
 
 func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
@@ -35,14 +58,14 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var bookmark models.Bookmark
-	filter := bson.M{"_id": bookmarkID, "user_id": userID}
-	err = a.db.Client().Database("markly").
-		Collection("bookmarks").
-		FindOne(context.Background(), filter).
-		Decode(&bookmark)
+	bookmark, err := a.getBookmarkForSummary(userID, bookmarkID)
 	if err != nil {
-		utils.SendJSONError(w, "Bookmark not found", http.StatusNotFound)
+		if err == mongo.ErrNoDocuments {
+			utils.SendJSONError(w, "Bookmark not found", http.StatusNotFound)
+		} else {
+			log.Printf("Error fetching bookmark %s: %v", bookmarkID.Hex(), err)
+			utils.SendJSONError(w, "Failed to retrieve bookmark", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -53,11 +76,7 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update := bson.M{"$set": bson.M{"summary": summary}}
-	_, err = a.db.Client().Database("markly").
-		Collection("bookmarks").
-		UpdateOne(context.Background(), filter, update)
-	if err != nil {
+	if err := a.updateBookmarkSummary(bookmarkID, userID, summary); err != nil {
 		utils.SendJSONError(w, "Failed to save summary", http.StatusInternalServerError)
 		return
 	}
@@ -66,12 +85,7 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, bookmark)
 }
 
-func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Request) {
-	userID, err := utils.GetUserIDFromContext(w, r)
-	if err != nil {
-		return
-	}
-
+func (a *AgentHandler) getPromptBookmarkInfo(userID primitive.ObjectID) ([]models.PromptBookmarkInfo, error) {
 	// Fetch user's bookmarks from the last 7 days
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	filter := bson.M{
@@ -81,28 +95,24 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 
 	cursor, err := a.db.Client().Database("markly").Collection("bookmarks").Find(context.Background(), filter)
 	if err != nil {
-		utils.SendJSONError(w, "Failed to fetch recent bookmarks", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to fetch recent bookmarks: %w", err)
 	}
 	defer cursor.Close(context.Background())
 
 	var recentBookmarks []models.Bookmark
 	if err = cursor.All(context.Background(), &recentBookmarks); err != nil {
-		utils.SendJSONError(w, "Failed to decode recent bookmarks", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to decode recent bookmarks: %w", err)
 	}
 
 	// Fetch all categories for the user
 	categoryCursor, err := a.db.Client().Database("markly").Collection("categories").Find(context.Background(), bson.M{"user_id": userID})
 	if err != nil {
-		utils.SendJSONError(w, "Failed to fetch categories", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to fetch categories: %w", err)
 	}
 	defer categoryCursor.Close(context.Background())
 	var categories []models.Category
 	if err = categoryCursor.All(context.Background(), &categories); err != nil {
-		utils.SendJSONError(w, "Failed to decode categories", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to decode categories: %w", err)
 	}
 	categoryMap := make(map[primitive.ObjectID]string)
 	for _, cat := range categories {
@@ -112,14 +122,12 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 	// Fetch all collections for the user
 	collectionCursor, err := a.db.Client().Database("markly").Collection("collections").Find(context.Background(), bson.M{"user_id": userID})
 	if err != nil {
-		utils.SendJSONError(w, "Failed to fetch collections", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to fetch collections: %w", err)
 	}
 	defer collectionCursor.Close(context.Background())
 	var collections []models.Collection
 	if err = collectionCursor.All(context.Background(), &collections); err != nil {
-		utils.SendJSONError(w, "Failed to decode collections", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to decode collections: %w", err)
 	}
 	collectionMap := make(map[primitive.ObjectID]string)
 	for _, col := range collections {
@@ -129,14 +137,12 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 	// Fetch all tags for the user
 	tagCursor, err := a.db.Client().Database("markly").Collection("tags").Find(context.Background(), bson.M{"user_id": userID})
 	if err != nil {
-		utils.SendJSONError(w, "Failed to fetch tags", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to fetch tags: %w", err)
 	}
 	defer tagCursor.Close(context.Background())
 	var tags []models.Tag
 	if err = tagCursor.All(context.Background(), &tags); err != nil {
-		utils.SendJSONError(w, "Failed to decode tags", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to decode tags: %w", err)
 	}
 	tagMap := make(map[primitive.ObjectID]string)
 	for _, tag := range tags {
@@ -171,6 +177,22 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 			Collection: collectionName,
 			Tags:       tagNames,
 		})
+	}
+
+	return promptBookmarks, nil
+}
+
+func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Request) {
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
+		return
+	}
+
+	promptBookmarks, err := a.getPromptBookmarkInfo(userID)
+	if err != nil {
+		log.Printf("Error preparing prompt bookmark info: %v", err)
+		utils.SendJSONError(w, fmt.Sprintf("Failed to prepare AI suggestions: %v", err), http.StatusInternalServerError)
+		return
 	}
 
 	if len(promptBookmarks) == 0 {

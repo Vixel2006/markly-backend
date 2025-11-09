@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,20 +27,14 @@ func NewBookmarksHandler(db database.Service) *BookmarkHandler {
 	return &BookmarkHandler{db: db}
 }
 
-func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
-	userID, err := utils.GetUserIDFromContext(w, r)
-	if err != nil {
-		return
-	}
-
+func (h *BookmarkHandler) buildBookmarkFilter(r *http.Request, userID primitive.ObjectID) (bson.M, error) {
 	filter := bson.M{"user_id": userID}
 
 	tagsParam := r.URL.Query().Get("tags")
 	if tagsParam != "" {
 		tagsIDs, err := utils.ParseObjectIDs(tagsParam)
 		if err != nil {
-			utils.SendJSONError(w, "Invalid tags ID format. Tags must be comma-separated hexadecimal ObjectIDs.", http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid tags ID format. Tags must be comma-separated hexadecimal ObjectIDs.")
 		}
 		filter["tagsid"] = bson.M{"$in": tagsIDs}
 	}
@@ -49,8 +43,7 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 	if categoryParam != "" {
 		categoryID, err := primitive.ObjectIDFromHex(categoryParam)
 		if err != nil {
-			http.Error(w, "Invalid category ID format. Category must be a hexadecimal ObjectID.", http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid category ID format. Category must be a hexadecimal ObjectID.")
 		}
 		filter["categoryid"] = categoryID
 	}
@@ -59,8 +52,7 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 	if collectionsParam != "" {
 		collectionIDs, err := utils.ParseObjectIDs(collectionsParam)
 		if err != nil {
-			http.Error(w, "Invalid collections ID format. Collections must be comma-separated hexadecimal ObjectIDs.", http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid collections ID format. Collections must be comma-separated hexadecimal ObjectIDs.")
 		}
 		filter["collectionsid"] = bson.M{"$in": collectionIDs}
 	}
@@ -69,10 +61,24 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 	if isFavParam != "" {
 		isFav, err := strconv.ParseBool(isFavParam)
 		if err != nil {
-			http.Error(w, "Invalid isFav format. Must be 'true' or 'false'.", http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid isFav format. Must be 'true' or 'false'.")
 		}
 		filter["is_fav"] = isFav
+	}
+
+	return filter, nil
+}
+
+func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
+		return
+	}
+
+	filter, err := h.buildBookmarkFilter(r, userID)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	var bookmarks []models.Bookmark
@@ -205,55 +211,6 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bm)
 }
 
-func (h *BookmarkHandler) validateReferences(userID primitive.ObjectID, tagIDs []primitive.ObjectID, collectionIDs []primitive.ObjectID, categoryID *primitive.ObjectID) error {
-	ctx := context.Background()
-
-	// Validate tags
-	if len(tagIDs) > 0 {
-		tagsCollection := h.db.Client().Database("markly").Collection("tags")
-		count, err := tagsCollection.CountDocuments(ctx, bson.M{
-			"_id":     bson.M{"$in": tagIDs},
-			"user_id": userID,
-		})
-		if err != nil {
-			return err
-		}
-		if count != int64(len(tagIDs)) {
-			return errors.New("one or more tags not found or do not belong to user")
-		}
-	}
-
-	if len(collectionIDs) > 0 {
-		collectionsCollection := h.db.Client().Database("markly").Collection("collections")
-		count, err := collectionsCollection.CountDocuments(ctx, bson.M{
-			"_id":     bson.M{"$in": collectionIDs},
-			"user_id": userID,
-		})
-		if err != nil {
-			return err
-		}
-		if count != int64(len(collectionIDs)) {
-			return errors.New("one or more collections not found or do not belong to user")
-		}
-	}
-
-	// Validate category
-	if categoryID != nil {
-		categoriesCollection := h.db.Client().Database("markly").Collection("categories")
-		count, err := categoriesCollection.CountDocuments(ctx, bson.M{
-			"_id":     *categoryID,
-			"user_id": userID,
-		})
-		if err != nil {
-			return err
-		}
-		if count == 0 {
-			return errors.New("category not found or does not belong to user")
-		}
-	}
-
-	return nil
-}
 
 func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request) {
 	userID, err := utils.GetUserIDFromContext(w, r)
@@ -314,23 +271,7 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
-	userID, err := utils.GetUserIDFromContext(w, r)
-	if err != nil {
-		return
-	}
-
-	bookmarkID, err := utils.GetObjectIDFromVars(w, r, "id")
-	if err != nil {
-		return
-	}
-
-	var updatePayload models.UpdateBookmarkRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
+func (h *BookmarkHandler) buildUpdateFields(updatePayload models.UpdateBookmarkRequestBody, userID primitive.ObjectID) (bson.M, error) {
 	updateFields := bson.M{}
 
 	if updatePayload.URL != nil {
@@ -352,14 +293,12 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 			}
 			objID, err := primitive.ObjectIDFromHex(tagIDStr)
 			if err != nil {
-				utils.SendJSONError(w, "Invalid tag ID format: "+tagIDStr, http.StatusBadRequest)
-				return
+				return nil, fmt.Errorf("invalid tag ID format: %s", tagIDStr)
 			}
 			tagsObjectIDs = append(tagsObjectIDs, objID)
 		}
 		if err := utils.ValidateReferences(h.db, userID, tagsObjectIDs, nil, nil); err != nil {
-			utils.SendJSONError(w, "Invalid tag reference: "+err.Error(), http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid tag reference: %w", err)
 		}
 		updateFields["tagsid"] = tagsObjectIDs
 	}
@@ -373,14 +312,12 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 			}
 			objID, err := primitive.ObjectIDFromHex(colIDStr)
 			if err != nil {
-				utils.SendJSONError(w, "Invalid collection ID format: "+colIDStr, http.StatusBadRequest)
-				return
+				return nil, fmt.Errorf("invalid collection ID format: %s", colIDStr)
 			}
 			collectionsObjectIDs = append(collectionsObjectIDs, objID)
 		}
 		if err := utils.ValidateReferences(h.db, userID, nil, collectionsObjectIDs, nil); err != nil {
-			utils.SendJSONError(w, "Invalid collection reference: "+err.Error(), http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid collection reference: %w", err)
 		}
 		updateFields["collectionsid"] = collectionsObjectIDs
 	}
@@ -395,21 +332,45 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 			// Attempt to convert the string to ObjectID
 			objID, err := primitive.ObjectIDFromHex(*updatePayload.CategoryID)
 			if err != nil {
-				utils.SendJSONError(w, "Invalid category ID format: "+err.Error(), http.StatusBadRequest)
-				return
+				return nil, fmt.Errorf("invalid category ID format: %w", err)
 			}
 			categoryObjectIDPtr = &objID
 		}
 
 		if err := utils.ValidateReferences(h.db, userID, nil, nil, categoryObjectIDPtr); err != nil {
-			utils.SendJSONError(w, "Invalid category reference: "+err.Error(), http.StatusBadRequest)
-			return
+			return nil, fmt.Errorf("invalid category reference: %w", err)
 		}
 		updateFields["categoryid"] = categoryObjectIDPtr
 	}
 
 	if updatePayload.IsFav != nil {
 		updateFields["is_fav"] = *updatePayload.IsFav
+	}
+
+	return updateFields, nil
+}
+
+func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request) {
+	userID, err := utils.GetUserIDFromContext(w, r)
+	if err != nil {
+		return
+	}
+
+	bookmarkID, err := utils.GetObjectIDFromVars(w, r, "id")
+	if err != nil {
+		return
+	}
+
+	var updatePayload models.UpdateBookmarkRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	updateFields, err := h.buildUpdateFields(updatePayload, userID)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if len(updateFields) == 0 {

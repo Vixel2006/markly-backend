@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings" // Keep strings for error check
 
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"markly/internal/database"
 	"markly/internal/models"
@@ -42,18 +42,11 @@ func (h *CollectionHandler) AddCollection(w http.ResponseWriter, r *http.Request
 
 	collection := h.db.Client().Database("markly").Collection("collections")
 
-	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
-		Options: options.Index().SetUnique(true),
-	}
-
-	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
-	if err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			log.Printf("Duplicate collection name: %v", err)
-			utils.SendJSONError(w, "Collection name already exists for this user.", http.StatusConflict)
+	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Collection name"); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			utils.SendJSONError(w, err.Error(), http.StatusConflict)
 		} else {
-			log.Printf("Failed to create index for collections: %v", err)
+			log.Printf("Failed to create index for collection: %v", err)
 			utils.SendJSONError(w, "Failed to set up collection", http.StatusInternalServerError)
 		}
 		return
@@ -156,6 +149,14 @@ func (h *CollectionHandler) DeleteCollection(w http.ResponseWriter, r *http.Requ
 	utils.RespondWithJSON(w, http.StatusOK, bson.M{"message": "Collection deleted successfully", "deleted_count": result.DeletedCount})
 }
 
+func (h *CollectionHandler) buildCollectionUpdateFields(updatePayload models.CollectionUpdate) (bson.M, error) {
+	updateFields := bson.M{}
+	if updatePayload.Name != nil {
+		updateFields["name"] = *updatePayload.Name
+	}
+	return updateFields, nil
+}
+
 func (h *CollectionHandler) UpdateCollection(w http.ResponseWriter, r *http.Request) {
 	userID, err := utils.GetUserIDFromContext(w, r)
 	if err != nil {
@@ -173,9 +174,10 @@ func (h *CollectionHandler) UpdateCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	updateFields := bson.M{}
-	if updatePayload.Name != nil {
-		updateFields["name"] = *updatePayload.Name
+	updateFields, err := h.buildCollectionUpdateFields(updatePayload)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if len(updateFields) == 0 {

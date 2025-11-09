@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-
+	"strings" // Keep strings for now, as it's used in the error check
+	
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"markly/internal/database"
 	"markly/internal/models"
@@ -42,20 +42,13 @@ func (h *CategoryHandler) AddCategory(w http.ResponseWriter, r *http.Request) {
 
 	collection := h.db.Client().Database("markly").Collection("categories")
 
-	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
-		Options: options.Index().SetUnique(true),
-	}
-
-	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
-	if err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			utils.SendJSONError(w, "Category name already exists for this user.", http.StatusConflict)
-			log.Printf("Duplicate category name: %v", err)
-			return
+	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Category name"); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			utils.SendJSONError(w, err.Error(), http.StatusConflict)
+		} else {
+			log.Printf("Failed to create index for category: %v", err)
+			utils.SendJSONError(w, "Failed to set up category collection", http.StatusInternalServerError)
 		}
-		log.Printf("Failed to create index: %v", err)
-		utils.SendJSONError(w, "Failed to set up category collection", http.StatusInternalServerError)
 		return
 	}
 
@@ -163,6 +156,17 @@ func (h *CategoryHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 	utils.RespondWithJSON(w, http.StatusOK, bson.M{"message": "Category deleted successfully", "deleted_count": deleteResult.DeletedCount})
 }
 
+func (h *CategoryHandler) buildCategoryUpdateFields(updatePayload models.CategoryUpdate) (bson.M, error) {
+	updateFields := bson.M{}
+	if updatePayload.Name != nil {
+		updateFields["name"] = *updatePayload.Name
+	}
+	if updatePayload.Emoji != nil {
+		updateFields["emoji"] = *updatePayload.Emoji
+	}
+	return updateFields, nil
+}
+
 func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID, err := utils.GetUserIDFromContext(w, r)
 	if err != nil {
@@ -180,12 +184,10 @@ func (h *CategoryHandler) UpdateCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	updateFields := bson.M{}
-	if updatePayload.Name != nil {
-		updateFields["name"] = *updatePayload.Name
-	}
-	if updatePayload.Emoji != nil {
-		updateFields["emoji"] = *updatePayload.Emoji
+	updateFields, err := h.buildCategoryUpdateFields(updatePayload)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if len(updateFields) == 0 {

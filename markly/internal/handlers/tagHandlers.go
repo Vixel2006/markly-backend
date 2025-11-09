@@ -13,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"markly/internal/database"
 	"markly/internal/models"
@@ -48,18 +47,11 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 
 	collection := h.db.Client().Database("markly").Collection("tags")
 
-	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
-		Options: options.Index().SetUnique(true),
-	}
-
-	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
-	if err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			log.Printf("Duplicate tag name for user: %v", err)
-			utils.SendJSONError(w, "Tag name already exists for this user.", http.StatusConflict)
+	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Tag name"); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			utils.SendJSONError(w, err.Error(), http.StatusConflict)
 		} else {
-			log.Printf("Failed to create index for tags: %v", err)
+			log.Printf("Failed to create index for tag: %v", err)
 			utils.SendJSONError(w, "Failed to set up tag collection", http.StatusInternalServerError)
 		}
 		return
@@ -78,6 +70,17 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondWithJSON(w, http.StatusCreated, tag)
+}
+
+func (h *TagHandler) fetchTagByID(ctx context.Context, userID, tagID primitive.ObjectID) (*models.Tag, error) {
+	var tag models.Tag
+	filter := bson.M{"_id": tagID, "user_id": userID}
+	collection := h.db.Client().Database("markly").Collection("tags")
+	err := collection.FindOne(ctx, filter).Decode(&tag)
+	if err != nil {
+		return nil, err
+	}
+	return &tag, nil
 }
 
 func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +102,6 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 		Err error
 	}
 
-	collection := h.db.Client().Database("markly").Collection("tags")
 
 	resultsChan := make(chan result, len(ids))
 	var wg sync.WaitGroup
@@ -117,17 +119,14 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			var tag models.Tag
-			filter := bson.M{"_id": objID, "user_id": userID}
-			err = collection.FindOne(ctx, filter).Decode(&tag)
-
+			tag, err := h.fetchTagByID(ctx, userID, objID)
 			if err != nil {
 				log.Printf("Error finding tag %s for user %s: %v", idStr, userID.Hex(), err)
 				resultsChan <- result{Err: err}
 				return
 			}
 
-			resultsChan <- result{Tag: tag, Err: nil}
+			resultsChan <- result{Tag: *tag, Err: nil}
 		}()
 	}
 
@@ -200,6 +199,20 @@ func (h *TagHandler) DeleteTag(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, bson.M{"message": "Tag deleted successfully", "deleted_count": deleteResult.DeletedCount})
 }
 
+func (h *TagHandler) buildTagUpdateFields(updatePayload models.TagUpdate) (bson.M, error) {
+	updateFields := bson.M{}
+	if updatePayload.Name != nil {
+		updateFields["name"] = *updatePayload.Name
+	}
+	if updatePayload.WeeklyCount != nil {
+		updateFields["weekly_count"] = *updatePayload.WeeklyCount
+	}
+	if updatePayload.PrevCount != nil {
+		updateFields["prev_count"] = *updatePayload.PrevCount
+	}
+	return updateFields, nil
+}
+
 func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 	userID, err := utils.GetUserIDFromContext(w, r)
 	if err != nil {
@@ -217,15 +230,10 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updateFields := bson.M{}
-	if updatePayload.Name != nil {
-		updateFields["name"] = *updatePayload.Name
-	}
-	if updatePayload.WeeklyCount != nil {
-		updateFields["weekly_count"] = *updatePayload.WeeklyCount
-	}
-	if updatePayload.PrevCount != nil {
-		updateFields["prev_count"] = *updatePayload.PrevCount
+	updateFields, err := h.buildTagUpdateFields(updatePayload)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if len(updateFields) == 0 {

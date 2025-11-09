@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 
 	"markly/internal/database"
@@ -52,18 +52,14 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	collection := u.db.Client().Database("markly").Collection("users")
 
-	indexModel := mongo.IndexModel{
-		Keys:    bson.M{"email": 1},
-		Options: options.Index().SetUnique(true),
-	}
-	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
-	if err != nil {
-		// Check if it's a duplicate key error using strings.Contains
-		if !strings.Contains(err.Error(), "E11000 duplicate key error collection") {
+	if err := utils.CreateUniqueIndex(collection, bson.M{"email": 1}, "Email"); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			utils.SendJSONError(w, err.Error(), http.StatusConflict)
+		} else {
 			log.Printf("Error creating unique email index: %v", err)
 			utils.SendJSONError(w, "Failed to set up database index", http.StatusInternalServerError)
-			return
 		}
+		return
 	}
 
 	_, err = collection.InsertOne(context.Background(), user)
@@ -154,6 +150,40 @@ func (u *UserHandler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, user)
 }
 
+func (u *UserHandler) buildUserProfileUpdateFields(updatePayload models.UserProfileUpdate, userID primitive.ObjectID) (bson.M, error) {
+	updateFields := bson.M{}
+	if updatePayload.Username != "" {
+		updateFields["username"] = updatePayload.Username
+	}
+	if updatePayload.Email != nil {
+		var currentUser models.User
+		err := u.db.Client().Database("markly").Collection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&currentUser)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify current user data: %w", err)
+		}
+
+		if currentUser.Email != *updatePayload.Email {
+			var existingUser models.User
+			err := u.db.Client().Database("markly").Collection("users").
+				FindOne(context.Background(), bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
+			if err == nil {
+				return nil, fmt.Errorf("email already in use by another account")
+			} else if err != mongo.ErrNoDocuments {
+				return nil, fmt.Errorf("failed to check email availability: %w", err)
+			}
+		}
+		updateFields["email"] = *updatePayload.Email
+	}
+	if updatePayload.Password != nil && *updatePayload.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updatePayload.Password), 8)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash new password: %w", err)
+		}
+		updateFields["password"] = string(hashedPassword)
+	}
+	return updateFields, nil
+}
+
 func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value("userID").(string)
 	if !ok {
@@ -173,41 +203,10 @@ func (u *UserHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updateFields := bson.M{}
-	if updatePayload.Username != "" {
-		updateFields["username"] = updatePayload.Username
-	}
-	if updatePayload.Email != nil {
-		var currentUser models.User
-		err := u.db.Client().Database("markly").Collection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&currentUser)
-		if err != nil {
-			log.Printf("Error fetching current user for email update check: %v", err)
-			utils.SendJSONError(w, "Failed to verify current user data", http.StatusInternalServerError)
-			return
-		}
-
-		if currentUser.Email != *updatePayload.Email {
-			var existingUser models.User
-			err := u.db.Client().Database("markly").Collection("users").
-				FindOne(context.Background(), bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
-			if err == nil {
-				utils.SendJSONError(w, "Email already in use by another account.", http.StatusConflict)
-				return
-			} else if err != mongo.ErrNoDocuments {
-				log.Printf("Error checking for duplicate email: %v", err)
-				utils.SendJSONError(w, "Failed to check email availability.", http.StatusInternalServerError)
-				return
-			}
-		}
-		updateFields["email"] = *updatePayload.Email
-	}
-	if updatePayload.Password != nil && *updatePayload.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updatePayload.Password), 8)
-		if err != nil {
-			utils.SendJSONError(w, "Failed to hash new password", http.StatusInternalServerError)
-			return
-		}
-		updateFields["password"] = string(hashedPassword)
+	updateFields, err := u.buildUserProfileUpdateFields(updatePayload, userID)
+	if err != nil {
+		utils.SendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	if len(updateFields) == 0 {

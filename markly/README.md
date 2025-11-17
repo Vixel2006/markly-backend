@@ -51,3 +51,7 @@ Clean up binary from the last build:
 ```bash
 make clean
 ```
+
+## API Documentation
+
+For a comprehensive guide to the Markly API endpoints, request/response formats, and authentication details, please refer to the [API Documentation](API.md).

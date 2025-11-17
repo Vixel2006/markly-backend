@@ -15,6 +15,7 @@ services:
       - mongo_bp
     volumes:
       - backend_data:/app/data
+    command: ["./api"]
 
   mongo_bp:
     image: mongo:latest
@@ -23,7 +24,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${BLUEPRINT_DB_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${BLUEPRINT_DB_ROOT_PASSWORD}
     ports:
-      - "${BLUEPRINT_DB_PORT}:27017"
+      - "27018:27017"
     volumes:
       - mongo_volume_bp:/data/db
 

@@ -900,6 +900,52 @@ Example (409 Conflict):
     *   `401 Unauthorized`: Missing or invalid token.
     *   `500 Internal Server Error`: Failed to generate summary.
 
+#### 7.4. Generate AI Suggestions
+
+*   **URL:** `/api/agent/suggestions`
+*   **Method:** `GET`
+*   **Description:** Generates AI-powered bookmark suggestions based on the user's recent bookmarking activity.
+*   **Authentication:** Required (JWT)
+*   **Query Parameters (Optional):
+    *   `bookmarks` (string): Comma-separated list of bookmark ObjectIDs to filter by.
+    *   `category` (string): Category ObjectID to filter by.
+    *   `collection` (string): Comma-separated list of collection ObjectIDs to filter by.
+    *   `tag` (string): Comma-separated list of tag ObjectIDs to filter by.
+*   **Success Response (200 OK):**
+    ```json
+    [
+      {
+        "url": "https://suggestion.com/article1",
+        "title": "Suggested Article One",
+        "summary": "A summary of a suggested article.",
+        "category": "Technology",
+        "collection": "Reading List",
+        "tags": ["AI", "Future"]
+      },
+      {
+        "url": "https://suggestion.com/article2",
+        "title": "Suggested Article Two",
+        "summary": "Another summary of a suggested article.",
+        "category": "Science",
+        "collection": "Research",
+        "tags": ["Physics"]
+      },
+      {
+        "url": "https://suggestion.com/article3",
+        "title": "Suggested Article Three",
+        "summary": "A third summary of a suggested article.",
+        "category": "History",
+        "collection": "Learning",
+        "tags": ["Ancient"]
+      }
+    ]
+    ```
+    *   Returns an array of `AISuggestion` objects.
+*   **Error Responses:**
+    *   `401 Unauthorized`: Missing or invalid token.
+    *   `500 Internal Server Error`: Failed to generate AI suggestions.
+    *   `200 OK` with error message: "No recent bookmarks found to generate suggestions from. Please add some bookmarks first." (This is a specific case handled by the backend, returning 200 OK but with an informative message if no recent bookmarks are available).
+
 #### 7.3. Generate AI Suggestions
 
 *   **URL:** `/api/agent/suggestions`

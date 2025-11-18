@@ -3,9 +3,10 @@ package database
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,7 +16,6 @@ import (
 type Service interface {
 	Health() map[string]string
 	Client() *mongo.Client
-
 }
 
 type service struct {
@@ -32,8 +32,7 @@ func New() Service {
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", host, port)))
 
 	if err != nil {
-		log.Fatal(err)
-
+		log.Fatal().Err(err).Msg("Failed to connect to MongoDB")
 	}
 	return &service{
 		db: client,
@@ -46,7 +45,11 @@ func (s *service) Health() map[string]string {
 
 	err := s.db.Ping(ctx, nil)
 	if err != nil {
-		log.Fatalf("db down: %v", err)
+		log.Error().Err(err).Msg("Database health check failed")
+		return map[string]string{
+			"message": "db down",
+			"error":   err.Error(),
+		}
 	}
 
 	return map[string]string{

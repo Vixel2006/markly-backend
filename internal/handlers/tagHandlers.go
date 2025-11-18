@@ -3,11 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson"
@@ -35,6 +36,7 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 
 	var tag models.Tag
 	if err := json.NewDecoder(r.Body).Decode(&tag); err != nil {
+		log.Error().Err(err).Msg("Invalid JSON input for AddTag")
 		utils.SendJSONError(w, "Invalid JSON input: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -49,9 +51,10 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 
 	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Tag name"); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
+			log.Warn().Err(err).Msg("Tag name already exists")
 			utils.SendJSONError(w, err.Error(), http.StatusConflict)
 		} else {
-			log.Printf("Failed to create index for tag: %v", err)
+			log.Error().Err(err).Msg("Failed to create index for tag")
 			utils.SendJSONError(w, "Failed to set up tag collection", http.StatusInternalServerError)
 		}
 		return
@@ -60,15 +63,16 @@ func (h *TagHandler) AddTag(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.InsertOne(context.Background(), tag)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			log.Println("Tag name already exists for this user.")
+			log.Warn().Str("tag_name", tag.Name).Str("user_id", userID.Hex()).Msg("Tag name already exists for this user")
 			utils.SendJSONError(w, "Tag name already exists for this user.", http.StatusConflict)
 		} else {
-			log.Printf("Failed to insert tag: %v", err)
+			log.Error().Err(err).Str("tag_name", tag.Name).Str("user_id", userID.Hex()).Msg("Failed to insert tag")
 			utils.SendJSONError(w, "Failed to insert tag", http.StatusInternalServerError)
 		}
 		return
 	}
 
+	log.Info().Str("tag_id", tag.ID.Hex()).Str("tag_name", tag.Name).Msg("Tag added successfully")
 	utils.RespondWithJSON(w, http.StatusCreated, tag)
 }
 
@@ -93,6 +97,7 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 	ids := r.URL.Query()["id"]
 
 	if len(ids) == 0 {
+		log.Debug().Msg("No tag IDs provided, returning empty list")
 		utils.RespondWithJSON(w, http.StatusOK, []models.Tag{})
 		return
 	}
@@ -101,7 +106,6 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 		Tag models.Tag
 		Err error
 	}
-
 
 	resultsChan := make(chan result, len(ids))
 	var wg sync.WaitGroup
@@ -114,14 +118,14 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 
 			objID, err := primitive.ObjectIDFromHex(strings.TrimSpace(idStr))
 			if err != nil {
-				log.Printf("Invalid tag ID format: %s - %v", idStr, err)
+				log.Error().Err(err).Str("tag_id_string", idStr).Msg("Invalid tag ID format")
 				resultsChan <- result{Err: err}
 				return
 			}
 
 			tag, err := h.fetchTagByID(ctx, userID, objID)
 			if err != nil {
-				log.Printf("Error finding tag %s for user %s: %v", idStr, userID.Hex(), err)
+				log.Error().Err(err).Str("tag_id", idStr).Str("user_id", userID.Hex()).Msg("Error finding tag")
 				resultsChan <- result{Err: err}
 				return
 			}
@@ -140,6 +144,7 @@ func (h *TagHandler) GetTagsByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	log.Info().Int("count", len(tags)).Str("user_id", userID.Hex()).Msg("Tags retrieved by ID successfully")
 	utils.RespondWithJSON(w, http.StatusOK, tags)
 }
 
@@ -155,18 +160,19 @@ func (h *TagHandler) GetUserTags(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"user_id": userID}
 	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
-		log.Printf("Error finding tags for user %s: %v", userID.Hex(), err)
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error finding tags for user")
 		utils.SendJSONError(w, "Failed to retrieve tags", http.StatusInternalServerError)
 		return
 	}
 	defer cursor.Close(context.Background())
 
 	if err := cursor.All(context.Background(), &tags); err != nil {
-		log.Printf("Error decoding tags: %v", err)
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error decoding tags")
 		utils.SendJSONError(w, "Error decoding tags", http.StatusInternalServerError)
 		return
 	}
 
+	log.Info().Int("count", len(tags)).Str("user_id", userID.Hex()).Msg("User tags retrieved successfully")
 	utils.RespondWithJSON(w, http.StatusOK, tags)
 }
 
@@ -186,16 +192,18 @@ func (h *TagHandler) DeleteTag(w http.ResponseWriter, r *http.Request) {
 
 	deleteResult, err := collection.DeleteOne(context.Background(), filter)
 	if err != nil {
-		log.Printf("Failed to delete tag with ID %s for user %s: %v", tagID.Hex(), userID.Hex(), err)
+		log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to delete tag")
 		utils.SendJSONError(w, "Failed to delete tag", http.StatusInternalServerError)
 		return
 	}
 
 	if deleteResult.DeletedCount == 0 {
+		log.Warn().Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Tag not found or unauthorized to delete")
 		utils.SendJSONError(w, "Tag not found or unauthorized", http.StatusNotFound)
 		return
 	}
 
+	log.Info().Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Tag deleted successfully")
 	utils.RespondWithJSON(w, http.StatusOK, bson.M{"message": "Tag deleted successfully", "deleted_count": deleteResult.DeletedCount})
 }
 
@@ -226,17 +234,20 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 
 	var updatePayload models.TagUpdate
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
+		log.Error().Err(err).Msg("Invalid JSON payload for UpdateTag")
 		utils.SendJSONError(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	updateFields, err := h.buildTagUpdateFields(updatePayload)
 	if err != nil {
+		log.Error().Err(err).Msg("Error building update fields for tag")
 		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if len(updateFields) == 0 {
+		log.Warn().Msg("No fields to update for tag")
 		utils.SendJSONError(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
@@ -249,15 +260,17 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
+			log.Warn().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Tag name already exists for this user")
 			utils.SendJSONError(w, "Tag name already exists for this user.", http.StatusConflict)
 		} else {
-			log.Printf("Failed to update tag with ID %s for user %s: %v", tagID.Hex(), userID.Hex(), err)
+			log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to update tag")
 			utils.SendJSONError(w, "Failed to update tag", http.StatusInternalServerError)
 		}
 		return
 	}
 
 	if result.MatchedCount == 0 {
+		log.Warn().Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Tag not found or unauthorized to update")
 		utils.SendJSONError(w, "Tag not found or unauthorized", http.StatusNotFound)
 		return
 	}
@@ -265,10 +278,11 @@ func (h *TagHandler) UpdateTag(w http.ResponseWriter, r *http.Request) {
 	var updatedTag models.Tag
 	err = collection.FindOne(context.Background(), filter).Decode(&updatedTag)
 	if err != nil {
-		log.Printf("Failed to find updated tag with ID %s for user %s: %v", tagID.Hex(), userID.Hex(), err)
+		log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to find updated tag")
 		utils.SendJSONError(w, "Failed to retrieve the updated tag", http.StatusInternalServerError)
 		return
 	}
 
+	log.Info().Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Tag updated successfully")
 	utils.RespondWithJSON(w, http.StatusOK, updatedTag)
 }

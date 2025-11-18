@@ -2,8 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+
+	"github.com/rs/zerolog/log"
 
 	"markly/internal/database"
 )
@@ -22,7 +23,7 @@ func (h *CommonHandler) HelloWorldHandler(w http.ResponseWriter, r *http.Request
 
 	jsonResp, err := json.Marshal(resp)
 	if err != nil {
-		log.Fatalf("error handling JSON marshal. Err: %v", err)
+		log.Fatal().Err(err).Msg("Error marshalling JSON response for HelloWorldHandler")
 	}
 
 	_, _ = w.Write(jsonResp)
@@ -32,7 +33,7 @@ func (h *CommonHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResp, err := json.Marshal(h.db.Health())
 
 	if err != nil {
-		log.Fatalf("error handling JSON marshal. Err: %v", err)
+		log.Fatal().Err(err).Msg("Error marshalling JSON response for HealthHandler")
 	}
 
 	_, _ = w.Write(jsonResp)

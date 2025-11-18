@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"markly/internal/database"
 	"markly/internal/models"
 	"markly/internal/services"
@@ -12,9 +11,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type AgentHandler struct {
@@ -63,7 +64,7 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 		if err == mongo.ErrNoDocuments {
 			utils.SendJSONError(w, "Bookmark not found", http.StatusNotFound)
 		} else {
-			log.Printf("Error fetching bookmark %s: %v", bookmarkID.Hex(), err)
+			log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error fetching bookmark")
 			utils.SendJSONError(w, "Failed to retrieve bookmark", http.StatusInternalServerError)
 		}
 		return
@@ -71,12 +72,13 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 
 	summary, err := services.LLMSummarize(bookmark.URL, bookmark.Title)
 	if err != nil {
-		log.Printf("Error generating summary for bookmark %s: %v", bookmarkID.Hex(), err)
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error generating summary for bookmark")
 		utils.SendJSONError(w, "Failed to generate summary", http.StatusInternalServerError)
 		return
 	}
 
 	if err := a.updateBookmarkSummary(bookmarkID, userID, summary); err != nil {
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Failed to save summary for bookmark")
 		utils.SendJSONError(w, "Failed to save summary", http.StatusInternalServerError)
 		return
 	}
@@ -85,7 +87,14 @@ func (a *AgentHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, bookmark)
 }
 
-func (a *AgentHandler) getPromptBookmarkInfo(userID primitive.ObjectID) ([]models.PromptBookmarkInfo, error) {
+type PromptBookmarkFilter struct {
+	BookmarkIDs  *[]primitive.ObjectID
+	CategoryID   *primitive.ObjectID
+	CollectionID *[]primitive.ObjectID
+	TagID        *[]primitive.ObjectID
+}
+
+func (a *AgentHandler) getPromptBookmarkInfo(userID primitive.ObjectID, bookmarkFilter PromptBookmarkFilter) ([]models.PromptBookmarkInfo, error) {
 	// Fetch user's bookmarks from the last 7 days
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	filter := bson.M{
@@ -93,7 +102,25 @@ func (a *AgentHandler) getPromptBookmarkInfo(userID primitive.ObjectID) ([]model
 		"created_at": bson.M{"$gte": sevenDaysAgo},
 	}
 
-	cursor, err := a.db.Client().Database("markly").Collection("bookmarks").Find(context.Background(), filter)
+	if bookmarkFilter.BookmarkIDs != nil {
+		filter["_id"] = bson.M{"$in": *bookmarkFilter.BookmarkIDs}
+	}
+
+	if bookmarkFilter.CategoryID != nil {
+		filter["category"] = *bookmarkFilter.CategoryID
+	}
+
+	if bookmarkFilter.CollectionID != nil {
+		filter["collections"] = bson.M{"$in": *bookmarkFilter.CollectionID}
+	}
+
+	if bookmarkFilter.TagID != nil {
+		filter["tags"] = bson.M{"$in": *bookmarkFilter.TagID}
+	}
+
+	opts := options.Find().SetLimit(3)
+
+	cursor, err := a.db.Client().Database("markly").Collection("bookmarks").Find(context.Background(), filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch recent bookmarks: %w", err)
 	}
@@ -188,14 +215,65 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	promptBookmarks, err := a.getPromptBookmarkInfo(userID)
+	var filter PromptBookmarkFilter
+
+	bookmarkParams := r.URL.Query().Get("bookmarks")
+
+	if bookmarkParams != "" {
+		bookmarkIDs, err := utils.ParseObjectIDs(bookmarkParams)
+		if err != nil {
+			log.Error().Err(err).Str("bookmark_params", bookmarkParams).Msg("Invalid bookmark ID format")
+			utils.SendJSONError(w, "Invalid bookmark ID format", http.StatusBadRequest)
+			return
+		}
+		filter.BookmarkIDs = &bookmarkIDs
+	}
+
+	categoryParam := r.URL.Query().Get("category")
+
+	if categoryParam != "" {
+		categoryID, err := primitive.ObjectIDFromHex(categoryParam)
+		if err != nil {
+			log.Error().Err(err).Str("category_param", categoryParam).Msg("Invalid category ID format")
+			utils.SendJSONError(w, "Invalid category ID format", http.StatusBadRequest)
+			return
+		}
+		filter.CategoryID = &categoryID
+	}
+
+	collectionParam := r.URL.Query().Get("collection")
+
+	if collectionParam != "" {
+		collectionID, err := utils.ParseObjectIDs(collectionParam)
+		if err != nil {
+			log.Error().Err(err).Str("collection_param", collectionParam).Msg("Invalid collection ID format")
+			utils.SendJSONError(w, "Invalid collection ID format", http.StatusBadRequest)
+			return
+		}
+		filter.CollectionID = &collectionID
+	}
+
+	tagParam := r.URL.Query().Get("tag")
+
+	if tagParam != "" {
+		tagID, err := utils.ParseObjectIDs(tagParam)
+		if err != nil {
+			log.Error().Err(err).Str("tag_param", tagParam).Msg("Invalid tag ID format")
+			utils.SendJSONError(w, "Invalid tag ID format", http.StatusBadRequest)
+			return
+		}
+		filter.TagID = &tagID
+	}
+
+	promptBookmarks, err := a.getPromptBookmarkInfo(userID, filter)
 	if err != nil {
-		log.Printf("Error preparing prompt bookmark info: %v", err)
+		log.Error().Err(err).Msg("Error preparing prompt bookmark info")
 		utils.SendJSONError(w, fmt.Sprintf("Failed to prepare AI suggestions: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if len(promptBookmarks) == 0 {
+		log.Info().Msg("No recent bookmarks found to generate suggestions from")
 		utils.SendJSONError(w, "No recent bookmarks found to generate suggestions from. Please add some bookmarks first.", http.StatusOK)
 		return
 	}
@@ -203,7 +281,7 @@ func (a *AgentHandler) GenerateAISuggestions(w http.ResponseWriter, r *http.Requ
 	// Generate suggestions using LLM
 	suggestions, err := services.LLMGenerateSuggestions(promptBookmarks)
 	if err != nil {
-		log.Printf("Error generating AI suggestions: %v", err)
+		log.Error().Err(err).Msg("Error generating AI suggestions")
 		utils.SendJSONError(w, fmt.Sprintf("Failed to generate AI suggestions: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -219,18 +297,20 @@ type SummarizeURLRequest struct {
 func (a *AgentHandler) SummarizeURL(w http.ResponseWriter, r *http.Request) {
 	var req SummarizeURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Error().Err(err).Msg("Invalid request payload for SummarizeURL")
 		utils.SendJSONError(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
 
 	if req.URL == "" {
+		log.Error().Msg("URL is required for SummarizeURL")
 		utils.SendJSONError(w, "URL is required", http.StatusBadRequest)
 		return
 	}
 
 	summary, err := services.LLMSummarize(req.URL, req.Title)
 	if err != nil {
-		log.Printf("Error generating summary for URL %s: %v", req.URL, err)
+		log.Error().Err(err).Str("url", req.URL).Msg("Error generating summary for URL")
 		utils.SendJSONError(w, "Failed to generate summary", http.StatusInternalServerError)
 		return
 	}

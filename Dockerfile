@@ -20,5 +20,5 @@ WORKDIR /app
 COPY --from=builder /app/cmd/api/api .
 
 EXPOSE 8080
-CMD ["./backend"]
+CMD ["./api"]
 

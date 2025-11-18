@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"markly/internal/models"
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/googleai"
 )
@@ -52,6 +52,10 @@ func LLMGenerateSuggestions(recentBookmarks []models.PromptBookmarkInfo) ([]mode
 	}
 
 	var recentBookmarksStr string
+	uniqueCategories := make(map[string]struct{})
+	uniqueCollections := make(map[string]struct{})
+	uniqueTags := make(map[string]struct{})
+
 	for _, bm := range recentBookmarks {
 		recentBookmarksStr += fmt.Sprintf("- Title: %s, URL: %s, Summary: %s, Category: %s, Tags: %v\n",
 			bm.Title,
@@ -59,6 +63,30 @@ func LLMGenerateSuggestions(recentBookmarks []models.PromptBookmarkInfo) ([]mode
 			bm.Summary,
 			bm.Category,
 			bm.Tags)
+
+		if bm.Category != "" {
+			uniqueCategories[bm.Category] = struct{}{}
+		}
+		if bm.Collection != "" {
+			uniqueCollections[bm.Collection] = struct{}{}
+		}
+		for _, tag := range bm.Tags {
+			uniqueTags[tag] = struct{}{}
+		}
+	}
+
+	// Convert maps to slices for the prompt
+	var categoriesList []string
+	for cat := range uniqueCategories {
+		categoriesList = append(categoriesList, cat)
+	}
+	var collectionsList []string
+	for col := range uniqueCollections {
+		collectionsList = append(collectionsList, col)
+	}
+	var tagsList []string
+	for tag := range uniqueTags {
+		tagsList = append(tagsList, tag)
 	}
 
 	prompt := fmt.Sprintf(`You are an AI assistant that suggests new bookmarks based on a user's recent activity.
@@ -67,7 +95,11 @@ The user's recent bookmarks are:
 
 Based on these, suggest 3 new, distinct bookmarks that the user might find interesting.
 For each suggestion, provide a URL, Title, a concise Summary (in Markdown format), a Category, a Collection, and a list of Tags.
-The Category, Collection, and Tags should be single words or short phrases, similar to the user's existing ones.
+IMPORTANT: The Category, Collection, and Tags for the suggestions MUST be chosen ONLY from the following lists derived from the user's recent bookmarks:
+- Allowed Categories: %s
+- Allowed Collections: %s
+- Allowed Tags: %s
+If a suitable category, collection, or tag is not available in these lists, you MUST omit it or use the most relevant one from the provided lists.
 Return ONLY the JSON array of objects, with no additional text or markdown formatting outside the JSON.
 The JSON array should contain exactly 3 objects, each with the following structure:
 {
@@ -105,7 +137,7 @@ Example of expected JSON output:
     "collection": "Learning",
     "tags": ["Ancient", "Civilizations"]
   }
-]`, recentBookmarksStr)
+]`, recentBookmarksStr, strings.Join(categoriesList, ", "), strings.Join(collectionsList, ", "), strings.Join(tagsList, ", "))
 
 	const maxRetries = 3
 	for i := 0; i < maxRetries; i++ {
@@ -115,7 +147,7 @@ Example of expected JSON output:
 		}
 
 		if llmResponse == "" {
-			log.Printf("LLM returned an empty response on retry %d", i+1)
+			log.Warn().Int("retry", i+1).Msg("LLM returned an empty response")
 			continue // Retry if empty
 		}
 
@@ -132,15 +164,14 @@ Example of expected JSON output:
 		var suggestions []models.AISuggestion
 		err = json.Unmarshal([]byte(cleanedResponse), &suggestions)
 		if err != nil {
-			log.Printf("LLM raw response (retry %d): %s", i+1, llmResponse)         // Log the raw response for debugging
-			log.Printf("LLM cleaned response (retry %d): %s", i+1, cleanedResponse) // Log the cleaned response for debugging
+			log.Error().Err(err).Int("retry", i+1).Str("raw_response", llmResponse).Str("cleaned_response", cleanedResponse).Msg("Failed to parse LLM response as JSON")
 			return nil, fmt.Errorf("failed to parse LLM response as JSON on retry %d: %w", i+1, err)
 		}
 
 		if len(suggestions) == 3 {
 			return suggestions, nil // Success
 		}
-		log.Printf("LLM returned %d suggestions on retry %d, expected 3. Retrying...", len(suggestions), i+1)
+		log.Warn().Int("retry", i+1).Int("suggestions_count", len(suggestions)).Msg("LLM returned unexpected number of suggestions. Retrying...")
 	}
 
 	return nil, errors.New("LLM failed to generate exactly 3 suggestions after multiple retries")

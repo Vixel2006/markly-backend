@@ -2,9 +2,9 @@ package database
 
 import (
 	"context"
-	"log"
 	"testing"
 
+	"github.com/rs/zerolog/log"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 )
@@ -34,13 +34,13 @@ func mustStartMongoContainer() (func(context.Context, ...testcontainers.Terminat
 func TestMain(m *testing.M) {
 	teardown, err := mustStartMongoContainer()
 	if err != nil {
-		log.Fatalf("could not start mongodb container: %v", err)
+		log.Fatal().Err(err).Msg("Could not start mongodb container")
 	}
 
 	m.Run()
 
 	if teardown != nil && teardown(context.Background()) != nil {
-		log.Fatalf("could not teardown mongodb container: %v", err)
+		log.Fatal().Err(err).Msg("Could not teardown mongodb container")
 	}
 }
 

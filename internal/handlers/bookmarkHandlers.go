@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson"
@@ -86,7 +87,7 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 
 	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
-		log.Printf("Error finding bookmarks: %v", err)
+		log.Error().Err(err).Msg("Error finding bookmarks")
 		http.Error(w, "Failed to retrieve bookmarks", http.StatusInternalServerError)
 		return
 	}
@@ -95,14 +96,14 @@ func (h *BookmarkHandler) GetBookmarks(w http.ResponseWriter, r *http.Request) {
 	for cursor.Next(context.Background()) {
 		var bm models.Bookmark
 		if err := cursor.Decode(&bm); err != nil {
-			log.Printf("Decode error for bookmark: %v", err)
+			log.Error().Err(err).Msg("Decode error for bookmark")
 			continue
 		}
 		bookmarks = append(bookmarks, bm)
 	}
 
 	if err := cursor.Err(); err != nil {
-		log.Printf("Cursor error during bookmarks iteration: %v", err)
+		log.Error().Err(err).Msg("Cursor error during bookmarks iteration")
 		http.Error(w, "Error processing bookmarks", http.StatusInternalServerError)
 		return
 	}
@@ -119,14 +120,15 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 
 	var reqBody models.AddBookmarkRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		log.Printf("Error decoding request body: %v", err)
+		log.Error().Err(err).Msg("Error decoding request body for AddBookmark")
 		utils.SendJSONError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Received bookmark request: %+v", reqBody)
+	log.Debug().Interface("request_body", reqBody).Msg("Received bookmark request")
 
 	if reqBody.URL == "" || reqBody.Title == "" {
+		log.Error().Msg("URL and Title are required for AddBookmark")
 		http.Error(w, "URL and Title are required", http.StatusBadRequest)
 		return
 	}
@@ -143,7 +145,7 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		}
 		objID, err := primitive.ObjectIDFromHex(tagIDStr)
 		if err != nil {
-			log.Printf("Invalid tag ID format: %s, error: %v", tagIDStr, err)
+			log.Error().Err(err).Str("tag_id", tagIDStr).Msg("Invalid tag ID format")
 			http.Error(w, "Invalid tag ID format: "+tagIDStr, http.StatusBadRequest)
 			return
 		}
@@ -156,7 +158,7 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		}
 		objID, err := primitive.ObjectIDFromHex(colIDStr)
 		if err != nil {
-			log.Printf("Invalid collection ID format: %s, error: %v", colIDStr, err)
+			log.Error().Err(err).Str("collection_id", colIDStr).Msg("Invalid collection ID format")
 			http.Error(w, "Invalid collection ID format: "+colIDStr, http.StatusBadRequest)
 			return
 		}
@@ -166,7 +168,7 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	if reqBody.CategoryID != nil && *reqBody.CategoryID != "" {
 		catID, err := primitive.ObjectIDFromHex(*reqBody.CategoryID)
 		if err != nil {
-			log.Printf("Invalid category ID format: %s, error: %v", *reqBody.CategoryID, err)
+			log.Error().Err(err).Str("category_id", *reqBody.CategoryID).Msg("Invalid category ID format")
 			http.Error(w, "Invalid category ID format: "+*reqBody.CategoryID, http.StatusBadRequest)
 			return
 		}
@@ -174,7 +176,7 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := utils.ValidateReferences(h.db, userID, tagsObjectIDs, collectionsObjectIDs, categoryObjectIDPtr); err != nil {
-		log.Printf("Reference validation failed: %v", err)
+		log.Error().Err(err).Msg("Reference validation failed for AddBookmark")
 		http.Error(w, "Invalid reference: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -192,19 +194,19 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		IsFav:         reqBody.IsFav,
 	}
 
-	log.Printf("Creating bookmark: %+v", bm)
+	log.Debug().Interface("bookmark", bm).Msg("Creating bookmark")
 
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
 	result, err := collection.InsertOne(context.Background(), bm)
 	if err != nil {
-		log.Printf("Error inserting bookmark: %v", err)
+		log.Error().Err(err).Msg("Error inserting bookmark")
 		http.Error(w, "Failed to add bookmark", http.StatusInternalServerError)
 		return
 	}
 
 	bm.ID = result.InsertedID.(primitive.ObjectID)
 
-	log.Printf("Successfully created bookmark with ID: %s", bm.ID.Hex())
+	log.Info().Str("bookmark_id", bm.ID.Hex()).Msg("Successfully created bookmark")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -234,7 +236,7 @@ func (h *BookmarkHandler) GetBookmarkByID(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		log.Printf("Error finding bookmark by ID %s: %v", bookmarkID.Hex(), err)
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error finding bookmark by ID")
 		utils.SendJSONError(w, "Failed to retrieve bookmark", http.StatusInternalServerError)
 		return
 	}
@@ -258,16 +260,18 @@ func (h *BookmarkHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request)
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
 	deleteResult, err := collection.DeleteOne(context.Background(), filter)
 	if err != nil {
-		log.Printf("Error deleting bookmark %s: %v", bookmarkID.Hex(), err)
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error deleting bookmark")
 		utils.SendJSONError(w, "Failed to delete bookmark", http.StatusInternalServerError)
 		return
 	}
 
 	if deleteResult.DeletedCount == 0 {
+		log.Warn().Str("bookmark_id", bookmarkID.Hex()).Msg("Bookmark not found or not authorized to delete")
 		utils.SendJSONError(w, "Bookmark not found or not authorized to delete", http.StatusNotFound)
 		return
 	}
 
+	log.Info().Str("bookmark_id", bookmarkID.Hex()).Msg("Bookmark deleted successfully")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -363,17 +367,20 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 
 	var updatePayload models.UpdateBookmarkRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&updatePayload); err != nil {
+		log.Error().Err(err).Msg("Invalid JSON for UpdateBookmark")
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	updateFields, err := h.buildUpdateFields(updatePayload, userID)
 	if err != nil {
+		log.Error().Err(err).Msg("Error building update fields for bookmark")
 		utils.SendJSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if len(updateFields) == 0 {
+		log.Warn().Msg("No valid fields provided for bookmark update")
 		utils.SendJSONError(w, "No valid fields provided for update", http.StatusBadRequest)
 		return
 	}
@@ -384,12 +391,13 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 	collection := h.db.Client().Database("markly").Collection("bookmarks")
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		log.Printf("Error updating bookmark %s: %v", bookmarkID.Hex(), err)
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error updating bookmark")
 		utils.SendJSONError(w, "Failed to update bookmark", http.StatusInternalServerError)
 		return
 	}
 
 	if result.MatchedCount == 0 {
+		log.Warn().Str("bookmark_id", bookmarkID.Hex()).Msg("Bookmark not found or not authorized to update")
 		utils.SendJSONError(w, "Bookmark not found or not authorized to update", http.StatusNotFound)
 		return
 	}
@@ -397,10 +405,11 @@ func (h *BookmarkHandler) UpdateBookmark(w http.ResponseWriter, r *http.Request)
 	var updatedBookmark models.Bookmark
 	err = collection.FindOne(context.Background(), filter).Decode(&updatedBookmark)
 	if err != nil {
-		log.Printf("Error fetching updated bookmark %s: %v", bookmarkID.Hex(), err)
+		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Msg("Error fetching updated bookmark")
 		utils.SendJSONError(w, "Failed to retrieve updated bookmark", http.StatusInternalServerError)
 		return
 	}
 
+	log.Info().Str("bookmark_id", bookmarkID.Hex()).Msg("Bookmark updated successfully")
 	utils.RespondWithJSON(w, http.StatusOK, updatedBookmark)
 }

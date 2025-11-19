@@ -17,12 +17,15 @@ import (
 var apiKey = os.Getenv("API_KEY")
 
 func LLMSummarize(url, title string) (string, error) {
+	log.Debug().Str("url", url).Str("title", title).Msg("Attempting to summarize URL with LLM")
 	if apiKey == "" {
+		log.Error().Msg("Missing API key for LLM summarization")
 		return "", errors.New("missing api key.")
 	}
 
 	llm, err := googleai.New(context.Background(), googleai.WithAPIKey(apiKey), googleai.WithDefaultModel("gemini-2.5-flash"))
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to create Google AI LLM for summarization")
 		return "", fmt.Errorf("failed to create Google AI LLM: %w", err)
 	}
 
@@ -35,19 +38,23 @@ func LLMSummarize(url, title string) (string, error) {
 
 	summary, err := llms.GenerateFromSinglePrompt(context.Background(), llm, prompt)
 	if err != nil {
+		log.Error().Err(err).Str("url", url).Str("title", title).Msg("Failed to generate summary from LLM")
 		return "", fmt.Errorf("failed to generate summary from LLM: %w", err)
 	}
-
+	log.Info().Str("url", url).Str("title", title).Msg("Successfully generated summary with LLM")
 	return summary, nil
 }
 
 func LLMGenerateSuggestions(recentBookmarks []models.PromptBookmarkInfo) ([]models.AISuggestion, error) {
+	log.Debug().Int("recentBookmarksCount", len(recentBookmarks)).Msg("Attempting to generate LLM suggestions")
 	if apiKey == "" {
+		log.Error().Msg("Missing API key for LLM suggestion generation")
 		return nil, errors.New("missing api key")
 	}
 
 	llm, err := googleai.New(context.Background(), googleai.WithAPIKey(apiKey), googleai.WithDefaultModel("gemini-2.5-flash"))
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to create Google AI LLM for suggestion generation")
 		return nil, fmt.Errorf("failed to create Google AI LLM: %w", err)
 	}
 
@@ -143,6 +150,7 @@ Example of expected JSON output:
 	for i := 0; i < maxRetries; i++ {
 		llmResponse, err := llms.GenerateFromSinglePrompt(context.Background(), llm, prompt)
 		if err != nil {
+			log.Error().Err(err).Int("retry", i+1).Msg("Failed to generate suggestions from LLM")
 			return nil, fmt.Errorf("failed to generate suggestions from LLM on retry %d: %w", i+1, err)
 		}
 
@@ -169,10 +177,12 @@ Example of expected JSON output:
 		}
 
 		if len(suggestions) == 3 {
+			log.Info().Int("suggestionsCount", len(suggestions)).Msg("Successfully generated LLM suggestions")
 			return suggestions, nil // Success
 		}
 		log.Warn().Int("retry", i+1).Int("suggestions_count", len(suggestions)).Msg("LLM returned unexpected number of suggestions. Retrying...")
 	}
 
+	log.Error().Msg("LLM failed to generate exactly 3 suggestions after multiple retries")
 	return nil, errors.New("LLM failed to generate exactly 3 suggestions after multiple retries")
 }

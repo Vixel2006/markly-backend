@@ -16,12 +16,3 @@ type AISuggestion struct {
 	Collection string   `json:"collection"`
 	Tags       []string `json:"tags"`
 }
-
-type PromptBookmarkInfo struct {
-	URL        string   `json:"url"`
-	Title      string   `json:"title"`
-	Summary    string   `json:"summary"`
-	Category   string   `json:"category"`
-	Collection string   `json:"collection"`
-	Tags       []string `json:"tags"`
-}

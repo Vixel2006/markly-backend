@@ -7,6 +7,7 @@ import (
 
 	"markly/internal/handlers"
 	"markly/internal/middlewares"
+	"markly/internal/services"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -30,7 +31,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 }
 
 func (s *Server) registerBookmarkRoutes(r *mux.Router) {
-	bh := handlers.NewBookmarksHandler(s.db)
+	bookmarkService := services.NewBookmarkService(s.db)
+	bh := handlers.NewBookmarksHandler(bookmarkService)
 
 	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.GetBookmarks))).Methods("GET", "OPTIONS")
 	r.Handle("/api/bookmarks", middlewares.AuthMiddleware(http.HandlerFunc(bh.AddBookmark))).Methods("POST", "OPTIONS")
@@ -50,7 +52,8 @@ func (s *Server) registerAuthRoutes(r *mux.Router) {
 }
 
 func (s *Server) registerCategoryRoutes(r *mux.Router) {
-	ch := handlers.NewCategoryHandler(s.db)
+	categoryService := services.NewCategoryService(s.db)
+	ch := handlers.NewCategoryHandler(categoryService)
 	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.AddCategory))).Methods("POST", "OPTIONS")
 	r.Handle("/api/categories", middlewares.AuthMiddleware(http.HandlerFunc(ch.GetCategories))).Methods("GET", "OPTIONS")
 	r.Handle("/api/categories/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ch.GetCategoryByID))).Methods("GET", "OPTIONS")
@@ -59,7 +62,8 @@ func (s *Server) registerCategoryRoutes(r *mux.Router) {
 }
 
 func (s *Server) registerCollectionRoutes(r *mux.Router) {
-	clh := handlers.NewCollectionHandler(s.db)
+	collectionService := services.NewCollectionService(s.db)
+	clh := handlers.NewCollectionHandler(collectionService)
 	r.Handle("/api/collections", middlewares.AuthMiddleware(http.HandlerFunc(clh.AddCollection))).Methods("POST", "OPTIONS")
 	r.Handle("/api/collections", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollections))).Methods("GET", "OPTIONS")
 	r.Handle("/api/collections/{id}", middlewares.AuthMiddleware(http.HandlerFunc(clh.GetCollection))).Methods("GET", "OPTIONS")
@@ -68,7 +72,8 @@ func (s *Server) registerCollectionRoutes(r *mux.Router) {
 }
 
 func (s *Server) registerTagRoutes(r *mux.Router) {
-	th := handlers.NewTagHandler(s.db)
+	tagService := services.NewTagService(s.db)
+	th := handlers.NewTagHandler(tagService)
 	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.AddTag))).Methods("POST", "OPTIONS")
 	r.Handle("/api/tags", middlewares.AuthMiddleware(http.HandlerFunc(th.GetTagsByID))).Methods("GET", "OPTIONS")
 	r.Handle("/api/tags/user", middlewares.AuthMiddleware(http.HandlerFunc(th.GetUserTags))).Methods("GET", "OPTIONS")

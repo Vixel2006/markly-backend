@@ -1,0 +1,219 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/crypto/bcrypt"
+
+	"markly/internal/database"
+	"markly/internal/models"
+	"markly/internal/utils"
+)
+
+// UserService defines the interface for user-related business logic.
+type UserService interface {
+	RegisterUser(ctx context.Context, user *models.User) (*models.User, error)
+	LoginUser(ctx context.Context, creds *models.Login) (string, error)
+	GetUserProfile(ctx context.Context, userID primitive.ObjectID) (*models.User, error)
+	UpdateUserProfile(ctx context.Context, userID primitive.ObjectID, updatePayload *models.UserProfileUpdate) (*models.User, error)
+	DeleteUser(ctx context.Context, userID primitive.ObjectID) error
+}
+
+// userService implements UserService using a MongoDB database.
+type userService struct {
+	db database.Service
+}
+
+// NewUserService creates a new UserService.
+func NewUserService(db database.Service) UserService {
+	return &userService{db: db}
+}
+
+func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*models.User, error) {
+	log.Debug().Str("email", user.Email).Msg("Attempting to register user")
+	if user.Username == "" || user.Email == "" || user.Password == "" {
+		log.Warn().Msg("Username, email, and password are required for registration")
+		return nil, fmt.Errorf("username, email, and password are required")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 8)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to hash password during registration")
+		return nil, fmt.Errorf("failed to hash password")
+	}
+
+	user.Password = string(hashedPassword)
+	user.ID = primitive.NewObjectID()
+
+	collection := s.db.Client().Database("markly").Collection("users")
+
+	if err := utils.CreateUniqueIndex(collection, bson.M{"email": 1}, "Email"); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			log.Warn().Err(err).Str("email", user.Email).Msg("Email already exists during index creation")
+			return nil, fmt.Errorf("email already exists")
+		}
+		log.Error().Err(err).Msg("Error creating unique email index")
+		return nil, fmt.Errorf("failed to set up database index")
+	}
+
+	_, err = collection.InsertOne(ctx, user)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			log.Warn().Str("email", user.Email).Msg("Email already exists during user insertion")
+			return nil, fmt.Errorf("email already exists")
+		}
+		log.Error().Err(err).Str("email", user.Email).Msg("Failed to insert user into database")
+		return nil, fmt.Errorf("failed to create user")
+	}
+
+	user.Password = "" // Clear password before returning
+	log.Info().Str("user_id", user.ID.Hex()).Str("email", user.Email).Msg("User registered successfully")
+	return user, nil
+}
+
+func (s *userService) LoginUser(ctx context.Context, creds *models.Login) (string, error) {
+	log.Debug().Str("email", creds.Email).Msg("Attempting user login")
+	collection := s.db.Client().Database("markly").Collection("users")
+
+	var user models.User
+	err := collection.FindOne(ctx, bson.M{"email": creds.Email}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Warn().Str("email", creds.Email).Msg("Invalid credentials during login attempt")
+			return "", fmt.Errorf("invalid credentials")
+		}
+		log.Error().Err(err).Str("email", creds.Email).Msg("Error finding user for login")
+		return "", fmt.Errorf("internal server error")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password)); err != nil {
+		log.Warn().Str("email", creds.Email).Msg("Invalid credentials (password mismatch) during login attempt")
+		return "", fmt.Errorf("invalid credentials")
+	}
+
+	token, err := utils.GenerateJWT(user.ID)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", user.ID.Hex()).Msg("Could not generate token for user")
+		return "", fmt.Errorf("could not generate token")
+	}
+
+	log.Info().Str("user_id", user.ID.Hex()).Msg("User logged in successfully")
+	return token, nil
+}
+
+func (s *userService) GetUserProfile(ctx context.Context, userID primitive.ObjectID) (*models.User, error) {
+	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to retrieve user profile")
+	var user models.User
+	collection := s.db.Client().Database("markly").Collection("users")
+
+	filter := bson.M{"_id": userID}
+
+	err := collection.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Warn().Str("user_id", userID.Hex()).Msg("User not found for GetMyProfile")
+			return nil, fmt.Errorf("user not found")
+		}
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Failed to fetch user profile")
+		return nil, fmt.Errorf("failed to fetch user profile")
+	}
+
+	user.Password = "" // Clear password before returning
+	log.Info().Str("user_id", userID.Hex()).Msg("User profile retrieved successfully")
+	return &user, nil
+}
+
+func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.ObjectID, updatePayload *models.UserProfileUpdate) (*models.User, error) {
+	log.Debug().Str("userID", userID.Hex()).Interface("updatePayload", updatePayload).Msg("Attempting to update user profile")
+	updateFields := bson.M{}
+	if updatePayload.Username != "" {
+		updateFields["username"] = updatePayload.Username
+	}
+	if updatePayload.Email != nil {
+		var currentUser models.User
+		err := s.db.Client().Database("markly").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&currentUser)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Failed to verify current user data for profile update")
+			return nil, fmt.Errorf("failed to verify current user data: %w", err)
+		}
+
+		if currentUser.Email != *updatePayload.Email {
+			var existingUser models.User
+			err := s.db.Client().Database("markly").Collection("users").
+				FindOne(ctx, bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
+			if err == nil {
+				log.Warn().Str("email", *updatePayload.Email).Msg("Email already in use by another account during profile update")
+				return nil, fmt.Errorf("email already in use by another account")
+			} else if err != mongo.ErrNoDocuments {
+				log.Error().Err(err).Str("email", *updatePayload.Email).Msg("Failed to check email availability during profile update")
+				return nil, fmt.Errorf("failed to check email availability: %w", err)
+			}
+		}
+		updateFields["email"] = *updatePayload.Email
+	}
+	if updatePayload.Password != nil && *updatePayload.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updatePayload.Password), 8)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Failed to hash new password for profile update")
+			return nil, fmt.Errorf("failed to hash new password: %w", err)
+		}
+		updateFields["password"] = string(hashedPassword)
+	}
+
+	if len(updateFields) == 0 {
+		log.Warn().Str("userID", userID.Hex()).Msg("No valid fields provided for user profile update")
+		return nil, fmt.Errorf("no valid fields provided for update")
+	}
+
+	filter := bson.M{"_id": userID}
+	update := bson.M{"$set": updateFields}
+
+	collection := s.db.Client().Database("markly").Collection("users")
+	result, err := collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error updating user profile")
+		return nil, fmt.Errorf("failed to update user profile")
+	}
+
+	if result.MatchedCount == 0 {
+		log.Warn().Str("user_id", userID.Hex()).Msg("User not found or not authorized to update profile")
+		return nil, fmt.Errorf("user not found or not authorized to update")
+	}
+
+	var updatedUser models.User
+	err = collection.FindOne(ctx, filter).Decode(&updatedUser)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error fetching updated user profile")
+		return nil, fmt.Errorf("failed to retrieve updated user profile")
+	}
+	updatedUser.Password = ""
+
+	log.Info().Str("user_id", userID.Hex()).Msg("User profile updated successfully")
+	return &updatedUser, nil
+}
+
+func (s *userService) DeleteUser(ctx context.Context, userID primitive.ObjectID) error {
+	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to delete user account")
+	collection := s.db.Client().Database("markly").Collection("users")
+
+	filter := bson.M{"_id": userID}
+	deleteResult, err := collection.DeleteOne(ctx, filter)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error deleting user account")
+		return fmt.Errorf("failed to delete account")
+	}
+
+	if deleteResult.DeletedCount == 0 {
+		log.Warn().Str("user_id", userID.Hex()).Msg("User account not found or not authorized to delete")
+		return fmt.Errorf("user account not found or not authorized to delete")
+	}
+
+	log.Info().Str("user_id", userID.Hex()).Msg("User account deleted successfully")
+	return nil
+}

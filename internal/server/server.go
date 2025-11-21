@@ -15,14 +15,20 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"markly/internal/database"
+	"markly/internal/repositories"
 	"markly/internal/services"
 )
 
 type Server struct {
-	port int
-	httpServer *http.Server
-	db database.Service
-	userService services.UserService
+	port              int
+	httpServer        *http.Server
+	db                database.Service
+	userService       services.UserService
+	bookmarkService   services.BookmarkService
+	categoryService   services.CategoryService
+	collectionService services.CollectionService
+	tagService        services.TagService
+	agentService      *services.AgentService
 }
 
 func NewServer() *Server {
@@ -33,15 +39,28 @@ func NewServer() *Server {
 		port = 8080 // Default port
 	}
 
+	db := database.New()
+
+	userRepo := repositories.NewUserRepository(db)
+	bookmarkRepo := repositories.NewBookmarkRepository(db)
+	categoryRepo := repositories.NewCategoryRepository(db)
+	collectionRepo := repositories.NewCollectionRepository(db)
+	tagRepo := repositories.NewTagRepository(db)
+
 	s := &Server{
-		port: port,
-		db: database.New(),
+		port:              port,
+		db:                db,
+		userService:       services.NewUserService(userRepo),
+		bookmarkService:   services.NewBookmarkService(bookmarkRepo, db), // db is for validation
+		categoryService:   services.NewCategoryService(categoryRepo),
+		collectionService: services.NewCollectionService(collectionRepo),
+		tagService:        services.NewTagService(tagRepo),
+		agentService:      services.NewAgentService(bookmarkRepo, categoryRepo, collectionRepo, tagRepo),
 	}
-	s.userService = services.NewUserService(s.db)
 
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
-		Handler:      s.RegisterRoutes(s.userService),
+		Handler:      s.RegisterRoutes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,

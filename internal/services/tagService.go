@@ -12,9 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"markly/internal/database"
 	"markly/internal/models"
-	"markly/internal/utils"
+	"markly/internal/repositories"
 )
 
 // TagService defines the interface for tag-related business logic.
@@ -28,12 +27,12 @@ type TagService interface {
 
 // tagServiceImpl implements the TagService interface.
 type tagServiceImpl struct {
-	db database.Service
+	tagRepo repositories.TagRepository
 }
 
 // NewTagService creates a new TagService.
-func NewTagService(db database.Service) TagService {
-	return &tagServiceImpl{db: db}
+func NewTagService(tagRepo repositories.TagRepository) TagService {
+	return &tagServiceImpl{tagRepo: tagRepo}
 }
 
 func (s *tagServiceImpl) AddTag(ctx context.Context, userID primitive.ObjectID, tag models.Tag) (*models.Tag, error) {
@@ -44,44 +43,27 @@ func (s *tagServiceImpl) AddTag(ctx context.Context, userID primitive.ObjectID, 
 	tag.PrevCount = 0
 	tag.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	collection := s.db.Client().Database("markly").Collection("tags")
+	// TODO: Unique index creation should be handled differently, perhaps at application startup.
+	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Tag name"); err != nil {
+	// 	if strings.Contains(err.Error(), "already exists") {
+	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("tagName", tag.Name).Msg("Tag name already exists during index creation")
+	// 		return nil, fmt.Errorf("tag name already exists")
+	// 	} else {
+	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for tag")
+	// 		return nil, fmt.Errorf("failed to set up tag collection")
+	// 	}
+	// }
 
-	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Tag name"); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("tagName", tag.Name).Msg("Tag name already exists during index creation")
-			return nil, fmt.Errorf("tag name already exists")
-		} else {
-			log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for tag")
-			return nil, fmt.Errorf("failed to set up tag collection")
-		}
-	}
-
-	_, err := collection.InsertOne(ctx, tag)
+	createdTag, err := s.tagRepo.Create(ctx, &tag)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("tagName", tag.Name).Msg("Tag name already exists for this user")
 			return nil, fmt.Errorf("tag name already exists for this user")
-		} else {
-			log.Error().Err(err).Str("tag_name", tag.Name).Str("user_id", userID.Hex()).Msg("Failed to insert tag")
-			return nil, fmt.Errorf("failed to insert tag")
 		}
-	}
-	log.Info().Str("userID", userID.Hex()).Str("tagID", tag.ID.Hex()).Interface("tagName", tag.Name).Msg("Tag added successfully")
-	return &tag, nil
-}
-
-func (s *tagServiceImpl) fetchTagByID(ctx context.Context, userID, tagID primitive.ObjectID) (*models.Tag, error) {
-	log.Debug().Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Attempting to fetch tag by ID")
-	var tag models.Tag
-	filter := bson.M{"_id": tagID, "user_id": userID}
-	collection := s.db.Client().Database("markly").Collection("tags")
-	err := collection.FindOne(ctx, filter).Decode(&tag)
-	if err != nil {
-		log.Error().Err(err).Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Failed to fetch tag by ID")
 		return nil, err
 	}
-	log.Debug().Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Successfully fetched tag by ID")
-	return &tag, nil
+	log.Info().Str("userID", userID.Hex()).Str("tagID", createdTag.ID.Hex()).Interface("tagName", createdTag.Name).Msg("Tag added successfully")
+	return createdTag, nil
 }
 
 func (s *tagServiceImpl) GetTagsByID(ctx context.Context, userID primitive.ObjectID, ids []string) ([]models.Tag, error) {
@@ -112,7 +94,7 @@ func (s *tagServiceImpl) GetTagsByID(ctx context.Context, userID primitive.Objec
 				return
 			}
 
-			tag, err := s.fetchTagByID(ctx, userID, objID)
+			tag, err := s.tagRepo.FindByID(ctx, userID, objID)
 			if err != nil {
 				log.Error().Err(err).Str("tag_id", idStr).Str("user_id", userID.Hex()).Msg("Error finding tag")
 				resultsChan <- result{Err: err}
@@ -138,20 +120,10 @@ func (s *tagServiceImpl) GetTagsByID(ctx context.Context, userID primitive.Objec
 
 func (s *tagServiceImpl) GetUserTags(ctx context.Context, userID primitive.ObjectID) ([]models.Tag, error) {
 	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to retrieve user tags")
-	var tags []models.Tag
-	collection := s.db.Client().Database("markly").Collection("tags")
-
-	filter := bson.M{"user_id": userID}
-	cursor, err := collection.Find(ctx, filter)
+	tags, err := s.tagRepo.FindByUser(ctx, userID)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error finding tags for user")
-		return nil, fmt.Errorf("failed to retrieve tags")
-	}
-	defer cursor.Close(ctx)
-
-	if err := cursor.All(ctx, &tags); err != nil {
-		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error decoding tags")
-		return nil, fmt.Errorf("error decoding tags")
+		return nil, err
 	}
 	log.Debug().Str("userID", userID.Hex()).Int("count", len(tags)).Msg("Successfully retrieved user tags")
 	return tags, nil
@@ -159,16 +131,13 @@ func (s *tagServiceImpl) GetUserTags(ctx context.Context, userID primitive.Objec
 
 func (s *tagServiceImpl) DeleteTag(ctx context.Context, userID, tagID primitive.ObjectID) (bool, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Attempting to delete tag")
-	collection := s.db.Client().Database("markly").Collection("tags")
-	filter := bson.M{"_id": tagID, "user_id": userID}
-
-	deleteResult, err := collection.DeleteOne(ctx, filter)
+	result, err := s.tagRepo.Delete(ctx, userID, tagID)
 	if err != nil {
 		log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to delete tag")
-		return false, fmt.Errorf("failed to delete tag")
+		return false, err
 	}
 
-	if deleteResult.DeletedCount == 0 {
+	if result.DeletedCount == 0 {
 		log.Warn().Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Tag not found or unauthorized to delete")
 		return false, fmt.Errorf("tag not found or unauthorized to delete")
 	}
@@ -205,20 +174,14 @@ func (s *tagServiceImpl) UpdateTag(ctx context.Context, userID, tagID primitive.
 		return nil, fmt.Errorf("no fields to update")
 	}
 
-	filter := bson.M{"_id": tagID, "user_id": userID}
-	update := bson.M{"$set": updateFields}
-
-	collection := s.db.Client().Database("markly").Collection("tags")
-
-	result, err := collection.UpdateOne(ctx, filter, update)
+	result, err := s.tagRepo.Update(ctx, userID, tagID, updateFields)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Tag name already exists for this user during update")
 			return nil, fmt.Errorf("tag name already exists for this user")
-		} else {
-			log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to update tag")
-			return nil, fmt.Errorf("failed to update tag")
 		}
+		log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to update tag")
+		return nil, fmt.Errorf("failed to update tag")
 	}
 
 	if result.MatchedCount == 0 {
@@ -226,12 +189,11 @@ func (s *tagServiceImpl) UpdateTag(ctx context.Context, userID, tagID primitive.
 		return nil, fmt.Errorf("tag not found or unauthorized to update")
 	}
 
-	var updatedTag models.Tag
-	err = collection.FindOne(ctx, filter).Decode(&updatedTag)
+	updatedTag, err := s.tagRepo.FindByID(ctx, userID, tagID)
 	if err != nil {
 		log.Error().Err(err).Str("tag_id", tagID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to find updated tag")
 		return nil, fmt.Errorf("failed to retrieve the updated tag")
 	}
 	log.Info().Str("userID", userID.Hex()).Str("tagID", tagID.Hex()).Msg("Tag updated successfully")
-	return &updatedTag, nil
+	return updatedTag, nil
 }

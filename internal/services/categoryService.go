@@ -3,17 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
-
 
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"markly/internal/database"
 	"markly/internal/models"
-	"markly/internal/utils"
+	"markly/internal/repositories"
 )
 
 // CategoryService defines the interface for category-related business logic.
@@ -27,12 +24,12 @@ type CategoryService interface {
 
 // categoryServiceImpl implements the CategoryService interface.
 type categoryServiceImpl struct {
-	db database.Service
+	categoryRepo repositories.CategoryRepository
 }
 
 // NewCategoryService creates a new CategoryService.
-func NewCategoryService(db database.Service) CategoryService {
-	return &categoryServiceImpl{db: db}
+func NewCategoryService(categoryRepo repositories.CategoryRepository) CategoryService {
+	return &categoryServiceImpl{categoryRepo: categoryRepo}
 }
 
 func (s *categoryServiceImpl) AddCategory(ctx context.Context, userID primitive.ObjectID, category models.Category) (*models.Category, error) {
@@ -40,51 +37,36 @@ func (s *categoryServiceImpl) AddCategory(ctx context.Context, userID primitive.
 	category.ID = primitive.NewObjectID()
 	category.UserID = userID
 
+	// TODO: Handle unique index creation at startup
+	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Category name"); err != nil {
+	// 	if strings.Contains(err.Error(), "already exists") {
+	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("categoryName", category.Name).Msg("Category name already exists during index creation")
+	// 		return nil, fmt.Errorf("category name already exists")
+	// 	} else {
+	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for category")
+	// 		return nil, fmt.Errorf("failed to set up category collection")
+	// 	}
+	// }
 
-	collection := s.db.Client().Database("markly").Collection("categories")
-
-	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Category name"); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("categoryName", category.Name).Msg("Category name already exists during index creation")
-			return nil, fmt.Errorf("category name already exists")
-		} else {
-			log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for category")
-			return nil, fmt.Errorf("failed to set up category collection")
-		}
-	}
-
-	_, err := collection.InsertOne(ctx, category)
+	createdCategory, err := s.categoryRepo.Create(ctx, &category)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("categoryName", category.Name).Msg("Category name already exists for this user")
 			return nil, fmt.Errorf("category name already exists for this user")
-		} else {
-			log.Error().Err(err).Str("category_name", category.Name).Str("user_id", userID.Hex()).Msg("Failed to insert category")
-			return nil, fmt.Errorf("failed to insert category")
 		}
+		log.Error().Err(err).Str("category_name", category.Name).Str("user_id", userID.Hex()).Msg("Failed to insert category")
+		return nil, err
 	}
-	log.Info().Str("userID", userID.Hex()).Str("categoryID", category.ID.Hex()).Interface("categoryName", category.Name).Msg("Category added successfully")
-	return &category, nil
+	log.Info().Str("userID", userID.Hex()).Str("categoryID", createdCategory.ID.Hex()).Interface("categoryName", createdCategory.Name).Msg("Category added successfully")
+	return createdCategory, nil
 }
 
 func (s *categoryServiceImpl) GetCategories(ctx context.Context, userID primitive.ObjectID) ([]models.Category, error) {
 	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to retrieve categories")
-	var categories []models.Category
-
-	collection := s.db.Client().Database("markly").Collection("categories")
-
-	filter := bson.M{"user_id": userID}
-
-	cursor, err := collection.Find(ctx, filter)
+	categories, err := s.categoryRepo.FindByUser(ctx, userID)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error finding categories")
-		return nil, fmt.Errorf("error fetching categories")
-	}
-	defer cursor.Close(ctx)
-
-	if err := cursor.All(ctx, &categories); err != nil {
-		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error decoding categories")
-		return nil, fmt.Errorf("error decoding categories")
+		return nil, err
 	}
 	log.Debug().Str("userID", userID.Hex()).Int("count", len(categories)).Msg("Successfully retrieved categories")
 	return categories, nil
@@ -92,37 +74,28 @@ func (s *categoryServiceImpl) GetCategories(ctx context.Context, userID primitiv
 
 func (s *categoryServiceImpl) GetCategoryByID(ctx context.Context, userID, categoryID primitive.ObjectID) (*models.Category, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Attempting to retrieve category by ID")
-	filter := bson.M{"_id": categoryID, "user_id": userID}
-
-	var category models.Category
-	collection := s.db.Client().Database("markly").Collection("categories")
-
-	err := collection.FindOne(ctx, filter).Decode(&category)
-	if err == mongo.ErrNoDocuments {
-		log.Warn().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Category not found")
-		return nil, fmt.Errorf("category not found")
-	}
+	category, err := s.categoryRepo.FindByID(ctx, userID, categoryID)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Warn().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Category not found")
+			return nil, fmt.Errorf("category not found")
+		}
 		log.Error().Err(err).Str("category_id", categoryID.Hex()).Str("user_id", userID.Hex()).Msg("Error finding category by ID")
 		return nil, fmt.Errorf("failed to retrieve category")
 	}
 	log.Debug().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Successfully retrieved category by ID")
-	return &category, nil
+	return category, nil
 }
 
 func (s *categoryServiceImpl) DeleteCategory(ctx context.Context, userID, categoryID primitive.ObjectID) (bool, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Attempting to delete category")
-	collection := s.db.Client().Database("markly").Collection("categories")
-
-	filter := bson.M{"user_id": userID, "_id": categoryID}
-
-	deleteResult, err := collection.DeleteOne(ctx, filter)
+	result, err := s.categoryRepo.Delete(ctx, userID, categoryID)
 	if err != nil {
 		log.Error().Err(err).Str("category_id", categoryID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to delete category")
-		return false, fmt.Errorf("failed to delete category")
+		return false, err
 	}
 
-	if deleteResult.DeletedCount == 0 {
+	if result.DeletedCount == 0 {
 		log.Warn().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Category not found or unauthorized to delete")
 		return false, fmt.Errorf("category not found or unauthorized to delete")
 	}
@@ -156,12 +129,7 @@ func (s *categoryServiceImpl) UpdateCategory(ctx context.Context, userID, catego
 		return nil, fmt.Errorf("no fields to update")
 	}
 
-	filter := bson.M{"_id": categoryID, "user_id": userID}
-	update := bson.M{"$set": updateFields}
-
-	collection := s.db.Client().Database("markly").Collection("categories")
-
-	result, err := collection.UpdateOne(ctx, filter, update)
+	result, err := s.categoryRepo.Update(ctx, userID, categoryID, updateFields)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Category name already exists for this user during update")
@@ -176,12 +144,11 @@ func (s *categoryServiceImpl) UpdateCategory(ctx context.Context, userID, catego
 		return nil, fmt.Errorf("category not found or unauthorized to update")
 	}
 
-	var updatedCategory models.Category
-	err = collection.FindOne(ctx, filter).Decode(&updatedCategory)
+	updatedCategory, err := s.categoryRepo.FindByID(ctx, userID, categoryID)
 	if err != nil {
 		log.Error().Err(err).Str("category_id", categoryID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to find updated category")
 		return nil, fmt.Errorf("failed to retrieve the updated category")
 	}
 	log.Info().Str("userID", userID.Hex()).Str("categoryID", categoryID.Hex()).Msg("Category updated successfully")
-	return &updatedCategory, nil
+	return updatedCategory, nil
 }

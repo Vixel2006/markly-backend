@@ -14,6 +14,7 @@ import (
 
 	"markly/internal/database"
 	"markly/internal/models"
+	"markly/internal/repositories"
 	"markly/internal/utils"
 )
 
@@ -28,12 +29,13 @@ type BookmarkService interface {
 
 // bookmarkServiceImpl implements the BookmarkService interface.
 type bookmarkServiceImpl struct {
-	db database.Service
+	bookmarkRepo repositories.BookmarkRepository
+	db           database.Service // for ValidateReferences, can be removed later
 }
 
 // NewBookmarkService creates a new BookmarkService.
-func NewBookmarkService(db database.Service) BookmarkService {
-	return &bookmarkServiceImpl{db: db}
+func NewBookmarkService(bookmarkRepo repositories.BookmarkRepository, db database.Service) BookmarkService {
+	return &bookmarkServiceImpl{bookmarkRepo: bookmarkRepo, db: db}
 }
 
 func (s *bookmarkServiceImpl) buildBookmarkFilter(r *http.Request, userID primitive.ObjectID) (bson.M, error) {
@@ -91,29 +93,12 @@ func (s *bookmarkServiceImpl) GetBookmarks(ctx context.Context, userID primitive
 		return nil, err
 	}
 
-	var bookmarks []models.Bookmark
-	collection := s.db.Client().Database("markly").Collection("bookmarks")
-
-	cursor, err := collection.Find(ctx, filter)
+	bookmarks, err := s.bookmarkRepo.Find(ctx, filter)
 	if err != nil {
 		log.Error().Err(err).Str("userID", userID.Hex()).Interface("filter", filter).Msg("Error finding bookmarks")
-		return nil, fmt.Errorf("failed to retrieve bookmarks")
-	}
-	defer cursor.Close(ctx)
-
-	for cursor.Next(ctx) {
-		var bm models.Bookmark
-		if err := cursor.Decode(&bm); err != nil {
-			log.Error().Err(err).Str("userID", userID.Hex()).Msg("Decode error for bookmark")
-			continue
-		}
-		bookmarks = append(bookmarks, bm)
+		return nil, err
 	}
 
-	if err := cursor.Err(); err != nil {
-		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Cursor error during bookmarks iteration")
-		return nil, fmt.Errorf("error processing bookmarks")
-	}
 	log.Debug().Str("userID", userID.Hex()).Int("count", len(bookmarks)).Msg("Successfully retrieved bookmarks")
 	return bookmarks, nil
 }
@@ -182,47 +167,41 @@ func (s *bookmarkServiceImpl) AddBookmark(ctx context.Context, userID primitive.
 		IsFav:         reqBody.IsFav,
 	}
 
-	collection := s.db.Client().Database("markly").Collection("bookmarks")
-	result, err := collection.InsertOne(ctx, bm)
+	createdBookmark, err := s.bookmarkRepo.Create(ctx, &bm)
 	if err != nil {
 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Error inserting bookmark")
-		return nil, fmt.Errorf("failed to add bookmark")
+		return nil, err
 	}
 
-	bm.ID = result.InsertedID.(primitive.ObjectID)
-	log.Info().Str("userID", userID.Hex()).Str("bookmarkID", bm.ID.Hex()).Msg("Bookmark added successfully")
-	return &bm, nil
+	log.Info().Str("userID", userID.Hex()).Str("bookmarkID", createdBookmark.ID.Hex()).Msg("Bookmark added successfully")
+	return createdBookmark, nil
 }
 
 func (s *bookmarkServiceImpl) GetBookmarkByID(ctx context.Context, userID, bookmarkID primitive.ObjectID) (*models.Bookmark, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Attempting to retrieve bookmark by ID")
 	filter := bson.M{"_id": bookmarkID, "user_id": userID}
 
-	var bm models.Bookmark
-	collection := s.db.Client().Database("markly").Collection("bookmarks")
-
-	err := collection.FindOne(ctx, filter).Decode(&bm)
-	if err == mongo.ErrNoDocuments {
-		log.Warn().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Bookmark not found")
-		return nil, fmt.Errorf("bookmark not found")
-	}
+	bm, err := s.bookmarkRepo.FindOne(ctx, filter)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Warn().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Bookmark not found")
+			return nil, fmt.Errorf("bookmark not found")
+		}
 		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Str("userID", userID.Hex()).Msg("Error finding bookmark by ID")
 		return nil, fmt.Errorf("failed to retrieve bookmark")
 	}
 	log.Debug().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Successfully retrieved bookmark by ID")
-	return &bm, nil
+	return bm, nil
 }
 
 func (s *bookmarkServiceImpl) DeleteBookmark(ctx context.Context, userID, bookmarkID primitive.ObjectID) (bool, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Attempting to delete bookmark")
 	filter := bson.M{"_id": bookmarkID, "user_id": userID}
 
-	collection := s.db.Client().Database("markly").Collection("bookmarks")
-	deleteResult, err := collection.DeleteOne(ctx, filter)
+	deleteResult, err := s.bookmarkRepo.DeleteOne(ctx, filter)
 	if err != nil {
 		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Str("userID", userID.Hex()).Msg("Error deleting bookmark")
-		return false, fmt.Errorf("failed to delete bookmark")
+		return false, err
 	}
 
 	if deleteResult.DeletedCount == 0 {
@@ -335,11 +314,10 @@ func (s *bookmarkServiceImpl) UpdateBookmark(ctx context.Context, userID, bookma
 	filter := bson.M{"_id": bookmarkID, "user_id": userID}
 	update := bson.M{"$set": updateFields}
 
-	collection := s.db.Client().Database("markly").Collection("bookmarks")
-	result, err := collection.UpdateOne(ctx, filter, update)
+	result, err := s.bookmarkRepo.UpdateOne(ctx, filter, update)
 	if err != nil {
 		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Str("userID", userID.Hex()).Msg("Error updating bookmark")
-		return nil, fmt.Errorf("failed to update bookmark")
+		return nil, err
 	}
 
 	if result.MatchedCount == 0 {
@@ -347,12 +325,11 @@ func (s *bookmarkServiceImpl) UpdateBookmark(ctx context.Context, userID, bookma
 		return nil, fmt.Errorf("bookmark not found or not authorized to update")
 	}
 
-	var updatedBookmark models.Bookmark
-	err = collection.FindOne(ctx, filter).Decode(&updatedBookmark)
+	updatedBookmark, err := s.bookmarkRepo.FindOne(ctx, filter)
 	if err != nil {
 		log.Error().Err(err).Str("bookmark_id", bookmarkID.Hex()).Str("userID", userID.Hex()).Msg("Error fetching updated bookmark")
 		return nil, fmt.Errorf("failed to retrieve updated bookmark")
 	}
 	log.Info().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Bookmark updated successfully")
-	return &updatedBookmark, nil
+	return updatedBookmark, nil
 }

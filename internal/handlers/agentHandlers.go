@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"markly/internal/database"
 	"markly/internal/models"
 	"markly/internal/services"
 	"markly/internal/utils"
@@ -15,14 +14,12 @@ import (
 )
 
 type AgentHandler struct {
-	db           database.Service
 	agentService *services.AgentService
 }
 
-func NewAgentHandler(db database.Service) *AgentHandler {
+func NewAgentHandler(agentService *services.AgentService) *AgentHandler {
 	return &AgentHandler{
-		db:           db,
-		agentService: services.NewAgentService(db),
+		agentService: agentService,
 	}
 }
 

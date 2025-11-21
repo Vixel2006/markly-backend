@@ -3,17 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
-
 
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"markly/internal/database"
 	"markly/internal/models"
-	"markly/internal/utils"
+	"markly/internal/repositories"
 )
 
 // CollectionService defines the interface for collection-related business logic.
@@ -27,12 +24,12 @@ type CollectionService interface {
 
 // collectionServiceImpl implements the CollectionService interface.
 type collectionServiceImpl struct {
-	db database.Service
+	collectionRepo repositories.CollectionRepository
 }
 
 // NewCollectionService creates a new CollectionService.
-func NewCollectionService(db database.Service) CollectionService {
-	return &collectionServiceImpl{db: db}
+func NewCollectionService(collectionRepo repositories.CollectionRepository) CollectionService {
+	return &collectionServiceImpl{collectionRepo: collectionRepo}
 }
 
 func (s *collectionServiceImpl) AddCollection(ctx context.Context, userID primitive.ObjectID, col models.Collection) (*models.Collection, error) {
@@ -40,48 +37,36 @@ func (s *collectionServiceImpl) AddCollection(ctx context.Context, userID primit
 	col.UserID = userID
 	col.ID = primitive.NewObjectID()
 
+	// TODO: Handle unique index creation at startup
+	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Collection name"); err != nil {
+	// 	if strings.Contains(err.Error(), "already exists") {
+	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("collectionName", col.Name).Msg("Collection name already exists during index creation")
+	// 		return nil, fmt.Errorf("collection name already exists")
+	// 	} else {
+	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for collection")
+	// 		return nil, fmt.Errorf("failed to set up collection")
+	// 	}
+	// }
 
-	collection := s.db.Client().Database("markly").Collection("collections")
-
-	if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Collection name"); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("collectionName", col.Name).Msg("Collection name already exists during index creation")
-			return nil, fmt.Errorf("collection name already exists")
-		} else {
-			log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for collection")
-			return nil, fmt.Errorf("failed to set up collection")
-		}
-	}
-
-	_, err := collection.InsertOne(ctx, col)
+	createdCol, err := s.collectionRepo.Create(ctx, &col)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Interface("collectionName", col.Name).Msg("Collection name already exists for this user")
 			return nil, fmt.Errorf("collection name already exists for this user")
-		} else {
-			log.Error().Err(err).Str("collection_name", col.Name).Str("user_id", userID.Hex()).Msg("Failed to insert collection")
-			return nil, fmt.Errorf("failed to insert collection")
 		}
+		log.Error().Err(err).Str("collection_name", col.Name).Str("user_id", userID.Hex()).Msg("Failed to insert collection")
+		return nil, err
 	}
-	log.Info().Str("userID", userID.Hex()).Str("collectionID", col.ID.Hex()).Interface("collectionName", col.Name).Msg("Collection added successfully")
-	return &col, nil
+	log.Info().Str("userID", userID.Hex()).Str("collectionID", createdCol.ID.Hex()).Interface("collectionName", createdCol.Name).Msg("Collection added successfully")
+	return createdCol, nil
 }
 
 func (s *collectionServiceImpl) GetCollections(ctx context.Context, userID primitive.ObjectID) ([]models.Collection, error) {
 	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to retrieve collections")
-	collection := s.db.Client().Database("markly").Collection("collections")
-
-	cursor, err := collection.Find(ctx, bson.M{"user_id": userID})
+	results, err := s.collectionRepo.FindByUser(ctx, userID)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Database error fetching collections")
-		return nil, fmt.Errorf("database error fetching collections")
-	}
-	defer cursor.Close(ctx)
-
-	var results []models.Collection
-	if err := cursor.All(ctx, &results); err != nil {
-		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error decoding collection results")
-		return nil, fmt.Errorf("error decoding collection results")
+		return nil, err
 	}
 	log.Debug().Str("userID", userID.Hex()).Int("count", len(results)).Msg("Successfully retrieved collections")
 	return results, nil
@@ -89,31 +74,25 @@ func (s *collectionServiceImpl) GetCollections(ctx context.Context, userID primi
 
 func (s *collectionServiceImpl) GetCollectionByID(ctx context.Context, userID, collectionID primitive.ObjectID) (*models.Collection, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Attempting to retrieve collection by ID")
-	collection := s.db.Client().Database("markly").Collection("collections")
-
-	var col models.Collection
-	filter := bson.M{"_id": collectionID, "user_id": userID}
-	err := collection.FindOne(ctx, filter).Decode(&col)
-	if err == mongo.ErrNoDocuments {
-		log.Warn().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Collection not found or unauthorized")
-		return nil, fmt.Errorf("collection not found or unauthorized")
-	} else if err != nil {
+	col, err := s.collectionRepo.FindByID(ctx, userID, collectionID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Warn().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Collection not found or unauthorized")
+			return nil, fmt.Errorf("collection not found or unauthorized")
+		}
 		log.Error().Err(err).Str("collection_id", collectionID.Hex()).Str("user_id", userID.Hex()).Msg("Database error finding collection")
 		return nil, fmt.Errorf("database error finding collection")
 	}
 	log.Debug().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Successfully retrieved collection by ID")
-	return &col, nil
+	return col, nil
 }
 
 func (s *collectionServiceImpl) DeleteCollection(ctx context.Context, userID, collectionID primitive.ObjectID) (bool, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Attempting to delete collection")
-	collection := s.db.Client().Database("markly").Collection("collections")
-
-	filter := bson.M{"_id": collectionID, "user_id": userID}
-	result, err := collection.DeleteOne(ctx, filter)
+	result, err := s.collectionRepo.Delete(ctx, userID, collectionID)
 	if err != nil {
 		log.Error().Err(err).Str("collection_id", collectionID.Hex()).Str("user_id", userID.Hex()).Msg("Database error deleting collection")
-		return false, fmt.Errorf("database error deleting collection")
+		return false, err
 	}
 	if result.DeletedCount == 0 {
 		log.Warn().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Collection not found or unauthorized to delete")
@@ -146,12 +125,7 @@ func (s *collectionServiceImpl) UpdateCollection(ctx context.Context, userID, co
 		return nil, fmt.Errorf("no fields to update")
 	}
 
-	filter := bson.M{"_id": collectionID, "user_id": userID}
-	update := bson.M{"$set": updateFields}
-
-	collection := s.db.Client().Database("markly").Collection("collections")
-
-	result, err := collection.UpdateOne(ctx, filter, update)
+	result, err := s.collectionRepo.Update(ctx, userID, collectionID, updateFields)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Collection name already exists for this user during update")
@@ -166,12 +140,11 @@ func (s *collectionServiceImpl) UpdateCollection(ctx context.Context, userID, co
 		return nil, fmt.Errorf("collection not found or unauthorized to update")
 	}
 
-	var updatedCollection models.Collection
-	err = collection.FindOne(ctx, filter).Decode(&updatedCollection)
+	updatedCollection, err := s.collectionRepo.FindByID(ctx, userID, collectionID)
 	if err != nil {
 		log.Error().Err(err).Str("collection_id", collectionID.Hex()).Str("user_id", userID.Hex()).Msg("Failed to find updated collection")
 		return nil, fmt.Errorf("failed to retrieve the updated collection")
 	}
 	log.Info().Str("userID", userID.Hex()).Str("collectionID", collectionID.Hex()).Msg("Collection updated successfully")
-	return &updatedCollection, nil
+	return updatedCollection, nil
 }

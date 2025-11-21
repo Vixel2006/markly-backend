@@ -8,6 +8,7 @@ import (
 
 	_ "github.com/joho/godotenv/autoload"
 
+	"markly/internal/metrics"
 	"markly/internal/models"
 	"markly/internal/services"
 	"markly/internal/utils"
@@ -66,6 +67,7 @@ func (h *BookmarkHandler) AddBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.BookmarkCreatedTotal.Inc()
 	log.Info().Str("bookmark_id", bm.ID.Hex()).Msg("Successfully created bookmark")
 
 	w.Header().Set("Content-Type", "application/json")

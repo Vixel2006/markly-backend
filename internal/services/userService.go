@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -23,16 +26,55 @@ type UserService interface {
 	GetUserProfile(ctx context.Context, userID primitive.ObjectID) (*models.User, error)
 	UpdateUserProfile(ctx context.Context, userID primitive.ObjectID, updatePayload *models.UserProfileUpdate) (*models.User, error)
 	DeleteUser(ctx context.Context, userID primitive.ObjectID) error
+	GetTotalUsers(ctx context.Context) (int64, error)
 }
 
 // userService implements UserService using a MongoDB database.
 type userService struct {
 	db database.Service
+	totalUsersGauge prometheus.Gauge
 }
 
 // NewUserService creates a new UserService.
 func NewUserService(db database.Service) UserService {
-	return &userService{db: db}
+	s := &userService{
+		db: db,
+		totalUsersGauge: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "app_total_users",
+			Help: "Total number of registered users in the application.",
+		}),
+	}
+
+	// Start a goroutine to periodically update the total users gauge
+	go s.updateTotalUsersPeriodically()
+
+	return s
+}
+
+func (s *userService) GetTotalUsers(ctx context.Context) (int64, error) {
+	collection := s.db.Client().Database("markly").Collection("users")
+	count, err := collection.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to count total users")
+		return 0, fmt.Errorf("failed to count total users: %w", err)
+	}
+	return count, nil
+}
+
+func (s *userService) updateTotalUsersPeriodically() {
+	ticker := time.NewTicker(30 * time.Second) // Update every 30 seconds
+	defer ticker.Stop()
+
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		count, err := s.GetTotalUsers(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("Error updating total users gauge")
+		} else {
+			s.totalUsersGauge.Set(float64(count))
+		}
+		cancel()
+	}
 }
 
 func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*models.User, error) {
@@ -74,6 +116,11 @@ func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*mod
 
 	user.Password = "" // Clear password before returning
 	log.Info().Str("user_id", user.ID.Hex()).Str("email", user.Email).Msg("User registered successfully")
+
+	// Update the total users gauge immediately
+	if count, err := s.GetTotalUsers(ctx); err == nil {
+		s.totalUsersGauge.Set(float64(count))
+	}
 	return user, nil
 }
 
@@ -215,5 +262,10 @@ func (s *userService) DeleteUser(ctx context.Context, userID primitive.ObjectID)
 	}
 
 	log.Info().Str("user_id", userID.Hex()).Msg("User account deleted successfully")
+
+	// Update the total users gauge immediately
+	if count, err := s.GetTotalUsers(ctx); err == nil {
+		s.totalUsersGauge.Set(float64(count))
+	}
 	return nil
 }

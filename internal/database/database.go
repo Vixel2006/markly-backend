@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -22,14 +21,12 @@ type service struct {
 	db *mongo.Client
 }
 
-var (
-	host = os.Getenv("BLUEPRINT_DB_HOST")
-	port = os.Getenv("BLUEPRINT_DB_PORT")
-	//database = os.Getenv("BLUEPRINT_DB_DATABASE")
-)
-
 func New() Service {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", host, port)))
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		log.Fatal().Msg("MONGO_URI environment variable not set")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
 
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to MongoDB")
@@ -60,5 +57,3 @@ func (s *service) Health() map[string]string {
 func (s *service) Client() *mongo.Client {
 	return s.db
 }
-
-

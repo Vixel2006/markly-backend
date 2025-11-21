@@ -1,0 +1,23 @@
+# apiVersion: 1
+
+# groups:
+#   - name: MarklyBackendAlerts
+#     rules:
+#       - alert: HighCPUUsage
+#         expr: rate(process_cpu_seconds_total{job="markly-backend"}[5m]) * 100 > 80
+      # - alert: HighMemoryUsage
+      #   expr: go_memstats_alloc_bytes{job="markly-backend"} > 1000000000
+      #   for: 5m
+      #   labels:
+      #     severity: warning
+      #   annotations:
+      #     summary: "High Memory usage detected on Markly Backend"
+      #     description: "The Markly Backend service is allocating a large amount of memory ({{ $value }} bytes)."
+      # - alert: HighRequestLatency
+      #   expr: histogram_quantile(0.99, sum by (le, method, path) (rate(http_request_duration_seconds_bucket{job="markly-backend"}[5m]))) > 0.5
+      #   for: 5m
+      #   labels:
+      #     severity: warning
+      #   annotations:
+      #     summary: "High Request Latency detected on Markly Backend"
+      #     description: "The 99th percentile of HTTP request duration is high ({{ $value }} seconds)."

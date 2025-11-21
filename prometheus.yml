@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s # By default, scrape targets every 15 seconds.
+
+scrape_configs:
+  - job_name: 'markly-backend'
+    static_configs:
+      - targets: ['markly-backend:8080'] # The name of our Go service in docker-compose

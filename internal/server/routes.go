@@ -4,16 +4,24 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"markly/internal/handlers"
 	"markly/internal/middlewares"
 	"markly/internal/services"
 )
 
-func (s *Server) RegisterRoutes() http.Handler {
+func (s *Server) RegisterRoutes(userService services.UserService) http.Handler {
 	r := mux.NewRouter()
 
 	r.Use(middlewares.CorsMiddleware)
+
+	// Initialize Prometheus middleware
+	prometheusMiddleware := middlewares.NewPrometheusMiddleware()
+	r.Use(prometheusMiddleware.Instrument)
+
+	// Prometheus metrics endpoint
+	r.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	ch := handlers.NewCommonHandler(s.db)
 	r.HandleFunc("/", ch.HelloWorldHandler)
@@ -42,7 +50,7 @@ func (s *Server) registerBookmarkRoutes(r *mux.Router) {
 }
 
 func (s *Server) registerAuthRoutes(r *mux.Router) {
-	uh := handlers.NewUserHandler(s.db)
+	uh := handlers.NewUserHandler(s.userService)
 
 	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")

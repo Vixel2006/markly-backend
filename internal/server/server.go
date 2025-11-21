@@ -15,12 +15,14 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"markly/internal/database"
+	"markly/internal/services"
 )
 
 type Server struct {
 	port int
 	httpServer *http.Server
 	db database.Service
+	userService services.UserService
 }
 
 func NewServer() *Server {
@@ -35,10 +37,11 @@ func NewServer() *Server {
 		port: port,
 		db: database.New(),
 	}
+	s.userService = services.NewUserService(s.db)
 
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
-		Handler:      s.RegisterRoutes(),
+		Handler:      s.RegisterRoutes(s.userService),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,

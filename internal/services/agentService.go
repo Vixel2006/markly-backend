@@ -13,7 +13,6 @@ import (
 	"markly/internal/repositories"
 )
 
-// AgentService provides business logic for agent-related operations.
 type AgentService struct {
 	bookmarkRepo   repositories.BookmarkRepository
 	categoryRepo   repositories.CategoryRepository
@@ -21,7 +20,6 @@ type AgentService struct {
 	tagRepo        repositories.TagRepository
 }
 
-// NewAgentService creates a new AgentService.
 func NewAgentService(
 	bookmarkRepo repositories.BookmarkRepository,
 	categoryRepo repositories.CategoryRepository,
@@ -36,7 +34,6 @@ func NewAgentService(
 	}
 }
 
-// GetBookmarkForSummary retrieves a specific bookmark for summarization.
 func (s *AgentService) GetBookmarkForSummary(userID, bookmarkID primitive.ObjectID) (*models.Bookmark, error) {
 	log.Debug().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Attempting to retrieve bookmark for summary")
 	filter := bson.M{"_id": bookmarkID, "user_id": userID}
@@ -49,7 +46,6 @@ func (s *AgentService) GetBookmarkForSummary(userID, bookmarkID primitive.Object
 	return bookmark, nil
 }
 
-// UpdateBookmarkSummary updates the summary of a specific bookmark.
 func (s *AgentService) UpdateBookmarkSummary(bookmarkID primitive.ObjectID, userID primitive.ObjectID, summary string) error {
 	log.Debug().Str("userID", userID.Hex()).Str("bookmarkID", bookmarkID.Hex()).Msg("Attempting to update bookmark summary")
 	filter := bson.M{"_id": bookmarkID, "user_id": userID}
@@ -63,11 +59,9 @@ func (s *AgentService) UpdateBookmarkSummary(bookmarkID primitive.ObjectID, user
 	return nil
 }
 
-// GetPromptBookmarkInfo fetches bookmark information relevant for AI prompting based on a filter.
 func (s *AgentService) GetPromptBookmarkInfo(userID primitive.ObjectID, bookmarkFilter models.PromptBookmarkFilter) ([]models.PromptBookmarkInfo, error) {
 	log.Debug().Str("userID", userID.Hex()).Interface("bookmarkFilter", bookmarkFilter).Msg("Attempting to fetch prompt bookmark info")
 
-	// Fetch user's bookmarks from the last 7 days
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	filter := bson.M{
 		"user_id":    userID,
@@ -94,7 +88,6 @@ func (s *AgentService) GetPromptBookmarkInfo(userID primitive.ObjectID, bookmark
 	}
 	log.Debug().Int("count", len(recentBookmarks)).Msg("Successfully fetched recent bookmarks")
 
-	// Fetch all categories, collections, and tags for the user
 	categories, err := s.categoryRepo.FindByUser(context.Background(), userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch categories: %w", err)

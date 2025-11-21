@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"markly/internal/handlers"
 	"go.mongodb.org/mongo-driver/mongo" // Import the mongo package
+	"markly/internal/handlers"
 )
 
 // MockDBService is a mock implementation of database.Service for testing

@@ -13,7 +13,6 @@ import (
 	"markly/internal/repositories"
 )
 
-// CategoryService defines the interface for category-related business logic.
 type CategoryService interface {
 	AddCategory(ctx context.Context, userID primitive.ObjectID, category models.Category) (*models.Category, error)
 	GetCategories(ctx context.Context, userID primitive.ObjectID) ([]models.Category, error)
@@ -22,12 +21,10 @@ type CategoryService interface {
 	UpdateCategory(ctx context.Context, userID, categoryID primitive.ObjectID, updatePayload models.CategoryUpdate) (*models.Category, error)
 }
 
-// categoryServiceImpl implements the CategoryService interface.
 type categoryServiceImpl struct {
 	categoryRepo repositories.CategoryRepository
 }
 
-// NewCategoryService creates a new CategoryService.
 func NewCategoryService(categoryRepo repositories.CategoryRepository) CategoryService {
 	return &categoryServiceImpl{categoryRepo: categoryRepo}
 }
@@ -36,17 +33,6 @@ func (s *categoryServiceImpl) AddCategory(ctx context.Context, userID primitive.
 	log.Debug().Str("userID", userID.Hex()).Interface("categoryName", category.Name).Msg("Attempting to add category")
 	category.ID = primitive.NewObjectID()
 	category.UserID = userID
-
-	// TODO: Handle unique index creation at startup
-	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Category name"); err != nil {
-	// 	if strings.Contains(err.Error(), "already exists") {
-	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("categoryName", category.Name).Msg("Category name already exists during index creation")
-	// 		return nil, fmt.Errorf("category name already exists")
-	// 	} else {
-	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for category")
-	// 		return nil, fmt.Errorf("failed to set up category collection")
-	// 	}
-	// }
 
 	createdCategory, err := s.categoryRepo.Create(ctx, &category)
 	if err != nil {

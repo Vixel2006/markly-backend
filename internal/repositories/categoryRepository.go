@@ -12,7 +12,6 @@ import (
 	"markly/internal/models"
 )
 
-// CategoryRepository defines the interface for category-related database operations.
 type CategoryRepository interface {
 	Create(ctx context.Context, category *models.Category) (*models.Category, error)
 	FindByID(ctx context.Context, userID, categoryID primitive.ObjectID) (*models.Category, error)
@@ -21,17 +20,14 @@ type CategoryRepository interface {
 	Delete(ctx context.Context, userID, categoryID primitive.ObjectID) (*mongo.DeleteResult, error)
 }
 
-// categoryRepository implements the CategoryRepository interface.
 type categoryRepository struct {
 	db database.Service
 }
 
-// NewCategoryRepository creates a new CategoryRepository.
 func NewCategoryRepository(db database.Service) CategoryRepository {
 	return &categoryRepository{db: db}
 }
 
-// Create inserts a new category into the database.
 func (r *categoryRepository) Create(ctx context.Context, category *models.Category) (*models.Category, error) {
 	collection := r.db.Client().Database("markly").Collection("categories")
 	_, err := collection.InsertOne(ctx, category)
@@ -41,7 +37,6 @@ func (r *categoryRepository) Create(ctx context.Context, category *models.Catego
 	return category, nil
 }
 
-// FindByID finds a category by its ID for a specific user.
 func (r *categoryRepository) FindByID(ctx context.Context, userID, categoryID primitive.ObjectID) (*models.Category, error) {
 	var category models.Category
 	filter := bson.M{"_id": categoryID, "user_id": userID}
@@ -53,7 +48,6 @@ func (r *categoryRepository) FindByID(ctx context.Context, userID, categoryID pr
 	return &category, nil
 }
 
-// FindByUser finds all categories for a specific user.
 func (r *categoryRepository) FindByUser(ctx context.Context, userID primitive.ObjectID) ([]models.Category, error) {
 	var categories []models.Category
 	collection := r.db.Client().Database("markly").Collection("categories")
@@ -70,7 +64,6 @@ func (r *categoryRepository) FindByUser(ctx context.Context, userID primitive.Ob
 	return categories, nil
 }
 
-// Update updates a category's information in the database.
 func (r *categoryRepository) Update(ctx context.Context, userID, categoryID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error) {
 	collection := r.db.Client().Database("markly").Collection("categories")
 	filter := bson.M{"_id": categoryID, "user_id": userID}
@@ -82,7 +75,6 @@ func (r *categoryRepository) Update(ctx context.Context, userID, categoryID prim
 	return result, nil
 }
 
-// Delete removes a category from the database.
 func (r *categoryRepository) Delete(ctx context.Context, userID, categoryID primitive.ObjectID) (*mongo.DeleteResult, error) {
 	collection := r.db.Client().Database("markly").Collection("categories")
 	filter := bson.M{"user_id": userID, "_id": categoryID}

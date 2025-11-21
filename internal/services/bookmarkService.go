@@ -18,7 +18,6 @@ import (
 	"markly/internal/utils"
 )
 
-// BookmarkService defines the interface for bookmark-related business logic.
 type BookmarkService interface {
 	GetBookmarks(ctx context.Context, userID primitive.ObjectID, r *http.Request) ([]models.Bookmark, error)
 	AddBookmark(ctx context.Context, userID primitive.ObjectID, reqBody models.AddBookmarkRequestBody) (*models.Bookmark, error)
@@ -27,13 +26,11 @@ type BookmarkService interface {
 	UpdateBookmark(ctx context.Context, userID, bookmarkID primitive.ObjectID, updatePayload models.UpdateBookmarkRequestBody) (*models.Bookmark, error)
 }
 
-// bookmarkServiceImpl implements the BookmarkService interface.
 type bookmarkServiceImpl struct {
 	bookmarkRepo repositories.BookmarkRepository
-	db           database.Service // for ValidateReferences, can be removed later
+	db           database.Service
 }
 
-// NewBookmarkService creates a new BookmarkService.
 func NewBookmarkService(bookmarkRepo repositories.BookmarkRepository, db database.Service) BookmarkService {
 	return &bookmarkServiceImpl{bookmarkRepo: bookmarkRepo, db: db}
 }

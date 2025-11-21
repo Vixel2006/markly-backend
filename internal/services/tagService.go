@@ -16,7 +16,6 @@ import (
 	"markly/internal/repositories"
 )
 
-// TagService defines the interface for tag-related business logic.
 type TagService interface {
 	AddTag(ctx context.Context, userID primitive.ObjectID, tag models.Tag) (*models.Tag, error)
 	GetTagsByID(ctx context.Context, userID primitive.ObjectID, ids []string) ([]models.Tag, error)
@@ -25,12 +24,10 @@ type TagService interface {
 	UpdateTag(ctx context.Context, userID, tagID primitive.ObjectID, updatePayload models.TagUpdate) (*models.Tag, error)
 }
 
-// tagServiceImpl implements the TagService interface.
 type tagServiceImpl struct {
 	tagRepo repositories.TagRepository
 }
 
-// NewTagService creates a new TagService.
 func NewTagService(tagRepo repositories.TagRepository) TagService {
 	return &tagServiceImpl{tagRepo: tagRepo}
 }
@@ -42,17 +39,6 @@ func (s *tagServiceImpl) AddTag(ctx context.Context, userID primitive.ObjectID, 
 	tag.WeeklyCount = 0
 	tag.PrevCount = 0
 	tag.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
-
-	// TODO: Unique index creation should be handled differently, perhaps at application startup.
-	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Tag name"); err != nil {
-	// 	if strings.Contains(err.Error(), "already exists") {
-	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("tagName", tag.Name).Msg("Tag name already exists during index creation")
-	// 		return nil, fmt.Errorf("tag name already exists")
-	// 	} else {
-	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for tag")
-	// 		return nil, fmt.Errorf("failed to set up tag collection")
-	// 	}
-	// }
 
 	createdTag, err := s.tagRepo.Create(ctx, &tag)
 	if err != nil {

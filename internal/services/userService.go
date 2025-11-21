@@ -3,10 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -30,41 +27,18 @@ type UserService interface {
 
 // userService implements UserService using a UserRepository.
 type userService struct {
-	userRepo        repositories.UserRepository
-	totalUsersGauge prometheus.Gauge
+	userRepo repositories.UserRepository
 }
 
 // NewUserService creates a new UserService.
 func NewUserService(userRepo repositories.UserRepository) UserService {
-	s := &userService{
+	return &userService{
 		userRepo: userRepo,
-		totalUsersGauge: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "app_total_users",
-			Help: "Total number of registered users in the application.",
-		}),
 	}
-	go s.updateTotalUsersPeriodically()
-	return s
 }
 
 func (s *userService) GetTotalUsers(ctx context.Context) (int64, error) {
 	return s.userRepo.CountAll(ctx)
-}
-
-func (s *userService) updateTotalUsersPeriodically() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		count, err := s.GetTotalUsers(ctx)
-		if err != nil {
-			log.Error().Err(err).Msg("Error updating total users gauge")
-		} else {
-			s.totalUsersGauge.Set(float64(count))
-		}
-		cancel()
-	}
 }
 
 func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*models.User, error) {
@@ -83,16 +57,6 @@ func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*mod
 	user.Password = string(hashedPassword)
 	user.ID = primitive.NewObjectID()
 
-	// ToDo: This logic should be in the repository
-	// if err := utils.CreateUniqueIndex(collection, bson.M{"email": 1}, "Email"); err != nil {
-	// 	if strings.Contains(err.Error(), "already exists") {
-	// 		log.Warn().Err(err).Str("email", user.Email).Msg("Email already exists during index creation")
-	// 		return nil, fmt.Errorf("email already exists")
-	// 	}
-	// 	log.Error().Err(err).Msg("Error creating unique email index")
-	// 	return nil, fmt.Errorf("failed to set up database index")
-	// }
-
 	createdUser, err := s.userRepo.Create(ctx, user)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
@@ -102,12 +66,9 @@ func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*mod
 		return nil, err
 	}
 
-	createdUser.Password = "" // Clear password before returning
+	createdUser.Password = ""
 	log.Info().Str("user_id", createdUser.ID.Hex()).Str("email", createdUser.Email).Msg("User registered successfully")
 
-	if count, err := s.GetTotalUsers(ctx); err == nil {
-		s.totalUsersGauge.Set(float64(count))
-	}
 	return createdUser, nil
 }
 
@@ -229,8 +190,5 @@ func (s *userService) DeleteUser(ctx context.Context, userID primitive.ObjectID)
 
 	log.Info().Str("user_id", userID.Hex()).Msg("User account deleted successfully")
 
-	if count, err := s.GetTotalUsers(ctx); err == nil {
-		s.totalUsersGauge.Set(float64(count))
-	}
 	return nil
 }

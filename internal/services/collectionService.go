@@ -13,7 +13,6 @@ import (
 	"markly/internal/repositories"
 )
 
-// CollectionService defines the interface for collection-related business logic.
 type CollectionService interface {
 	AddCollection(ctx context.Context, userID primitive.ObjectID, col models.Collection) (*models.Collection, error)
 	GetCollections(ctx context.Context, userID primitive.ObjectID) ([]models.Collection, error)
@@ -22,12 +21,10 @@ type CollectionService interface {
 	UpdateCollection(ctx context.Context, userID, collectionID primitive.ObjectID, updatePayload models.CollectionUpdate) (*models.Collection, error)
 }
 
-// collectionServiceImpl implements the CollectionService interface.
 type collectionServiceImpl struct {
 	collectionRepo repositories.CollectionRepository
 }
 
-// NewCollectionService creates a new CollectionService.
 func NewCollectionService(collectionRepo repositories.CollectionRepository) CollectionService {
 	return &collectionServiceImpl{collectionRepo: collectionRepo}
 }
@@ -36,17 +33,6 @@ func (s *collectionServiceImpl) AddCollection(ctx context.Context, userID primit
 	log.Debug().Str("userID", userID.Hex()).Interface("collectionName", col.Name).Msg("Attempting to add collection")
 	col.UserID = userID
 	col.ID = primitive.NewObjectID()
-
-	// TODO: Handle unique index creation at startup
-	// if err := utils.CreateUniqueIndex(collection, bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}}, "Collection name"); err != nil {
-	// 	if strings.Contains(err.Error(), "already exists") {
-	// 		log.Warn().Err(err).Str("userID", userID.Hex()).Interface("collectionName", col.Name).Msg("Collection name already exists during index creation")
-	// 		return nil, fmt.Errorf("collection name already exists")
-	// 	} else {
-	// 		log.Error().Err(err).Str("userID", userID.Hex()).Msg("Failed to create index for collection")
-	// 		return nil, fmt.Errorf("failed to set up collection")
-	// 	}
-	// }
 
 	createdCol, err := s.collectionRepo.Create(ctx, &col)
 	if err != nil {

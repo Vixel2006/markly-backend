@@ -13,7 +13,6 @@ import (
 	"markly/internal/models"
 )
 
-// TagRepository defines the interface for tag-related database operations.
 type TagRepository interface {
 	Create(ctx context.Context, tag *models.Tag) (*models.Tag, error)
 	FindByID(ctx context.Context, userID, tagID primitive.ObjectID) (*models.Tag, error)
@@ -22,17 +21,14 @@ type TagRepository interface {
 	Delete(ctx context.Context, userID, tagID primitive.ObjectID) (*mongo.DeleteResult, error)
 }
 
-// tagRepository implements the TagRepository interface.
 type tagRepository struct {
 	db database.Service
 }
 
-// NewTagRepository creates a new TagRepository.
 func NewTagRepository(db database.Service) TagRepository {
 	return &tagRepository{db: db}
 }
 
-// Create inserts a new tag into the database.
 func (r *tagRepository) Create(ctx context.Context, tag *models.Tag) (*models.Tag, error) {
 	collection := r.db.Client().Database("markly").Collection("tags")
 	_, err := collection.InsertOne(ctx, tag)
@@ -43,7 +39,6 @@ func (r *tagRepository) Create(ctx context.Context, tag *models.Tag) (*models.Ta
 	return tag, nil
 }
 
-// FindByID finds a tag by its ID for a specific user.
 func (r *tagRepository) FindByID(ctx context.Context, userID, tagID primitive.ObjectID) (*models.Tag, error) {
 	var tag models.Tag
 	filter := bson.M{"_id": tagID, "user_id": userID}
@@ -55,7 +50,6 @@ func (r *tagRepository) FindByID(ctx context.Context, userID, tagID primitive.Ob
 	return &tag, nil
 }
 
-// FindByUser finds all tags for a specific user.
 func (r *tagRepository) FindByUser(ctx context.Context, userID primitive.ObjectID) ([]models.Tag, error) {
 	var tags []models.Tag
 	collection := r.db.Client().Database("markly").Collection("tags")
@@ -72,7 +66,6 @@ func (r *tagRepository) FindByUser(ctx context.Context, userID primitive.ObjectI
 	return tags, nil
 }
 
-// Update updates a tag's information in the database.
 func (r *tagRepository) Update(ctx context.Context, userID, tagID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error) {
 	collection := r.db.Client().Database("markly").Collection("tags")
 	filter := bson.M{"_id": tagID, "user_id": userID}
@@ -84,7 +77,6 @@ func (r *tagRepository) Update(ctx context.Context, userID, tagID primitive.Obje
 	return result, nil
 }
 
-// Delete removes a tag from the database.
 func (r *tagRepository) Delete(ctx context.Context, userID, tagID primitive.ObjectID) (*mongo.DeleteResult, error) {
 	collection := r.db.Client().Database("markly").Collection("tags")
 	filter := bson.M{"_id": tagID, "user_id": userID}

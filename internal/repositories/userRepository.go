@@ -13,7 +13,6 @@ import (
 	"markly/internal/models"
 )
 
-// UserRepository defines the interface for user-related database operations.
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
@@ -23,17 +22,14 @@ type UserRepository interface {
 	CountAll(ctx context.Context) (int64, error)
 }
 
-// userRepository implements the UserRepository interface.
 type userRepository struct {
 	db database.Service
 }
 
-// NewUserRepository creates a new UserRepository.
 func NewUserRepository(db database.Service) UserRepository {
 	return &userRepository{db: db}
 }
 
-// Create inserts a new user into the database.
 func (r *userRepository) Create(ctx context.Context, user *models.User) (*models.User, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	_, err := collection.InsertOne(ctx, user)
@@ -44,18 +40,16 @@ func (r *userRepository) Create(ctx context.Context, user *models.User) (*models
 	return user, nil
 }
 
-// FindByEmail finds a user by their email address.
 func (r *userRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	var user models.User
 	err := collection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
 	if err != nil {
-		return nil, err // Can be mongo.ErrNoDocuments
+		return nil, err
 	}
 	return &user, nil
 }
 
-// FindByID finds a user by their ID.
 func (r *userRepository) FindByID(ctx context.Context, userID primitive.ObjectID) (*models.User, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	var user models.User
@@ -66,7 +60,6 @@ func (r *userRepository) FindByID(ctx context.Context, userID primitive.ObjectID
 	return &user, nil
 }
 
-// Update updates a user's information in the database.
 func (r *userRepository) Update(ctx context.Context, userID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	update := bson.M{"$set": updateFields}
@@ -78,7 +71,6 @@ func (r *userRepository) Update(ctx context.Context, userID primitive.ObjectID, 
 	return result, nil
 }
 
-// Delete removes a user from the database.
 func (r *userRepository) Delete(ctx context.Context, userID primitive.ObjectID) (*mongo.DeleteResult, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	filter := bson.M{"_id": userID}
@@ -90,7 +82,6 @@ func (r *userRepository) Delete(ctx context.Context, userID primitive.ObjectID) 
 	return result, nil
 }
 
-// CountAll counts the total number of users.
 func (r *userRepository) CountAll(ctx context.Context) (int64, error) {
 	collection := r.db.Client().Database("markly").Collection("users")
 	count, err := collection.CountDocuments(ctx, bson.M{})

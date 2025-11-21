@@ -82,7 +82,6 @@ func LLMGenerateSuggestions(recentBookmarks []models.PromptBookmarkInfo) ([]mode
 		}
 	}
 
-	// Convert maps to slices for the prompt
 	var categoriesList []string
 	for cat := range uniqueCategories {
 		categoriesList = append(categoriesList, cat)

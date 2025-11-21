@@ -51,7 +51,7 @@ func NewServer() *Server {
 		port:              port,
 		db:                db,
 		userService:       services.NewUserService(userRepo),
-		bookmarkService:   services.NewBookmarkService(bookmarkRepo, db), // db is for validation
+		bookmarkService:   services.NewBookmarkService(bookmarkRepo, db),
 		categoryService:   services.NewCategoryService(categoryRepo),
 		collectionService: services.NewCollectionService(collectionRepo),
 		tagService:        services.NewTagService(tagRepo),

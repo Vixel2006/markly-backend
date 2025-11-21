@@ -12,7 +12,6 @@ import (
 	"markly/internal/models"
 )
 
-// CollectionRepository defines the interface for collection-related database operations.
 type CollectionRepository interface {
 	Create(ctx context.Context, col *models.Collection) (*models.Collection, error)
 	FindByID(ctx context.Context, userID, collectionID primitive.ObjectID) (*models.Collection, error)
@@ -21,17 +20,14 @@ type CollectionRepository interface {
 	Delete(ctx context.Context, userID, collectionID primitive.ObjectID) (*mongo.DeleteResult, error)
 }
 
-// collectionRepository implements the CollectionRepository interface.
 type collectionRepository struct {
 	db database.Service
 }
 
-// NewCollectionRepository creates a new CollectionRepository.
 func NewCollectionRepository(db database.Service) CollectionRepository {
 	return &collectionRepository{db: db}
 }
 
-// Create inserts a new collection into the database.
 func (r *collectionRepository) Create(ctx context.Context, col *models.Collection) (*models.Collection, error) {
 	collection := r.db.Client().Database("markly").Collection("collections")
 	_, err := collection.InsertOne(ctx, col)
@@ -41,7 +37,6 @@ func (r *collectionRepository) Create(ctx context.Context, col *models.Collectio
 	return col, nil
 }
 
-// FindByID finds a collection by its ID for a specific user.
 func (r *collectionRepository) FindByID(ctx context.Context, userID, collectionID primitive.ObjectID) (*models.Collection, error) {
 	var col models.Collection
 	filter := bson.M{"_id": collectionID, "user_id": userID}
@@ -53,7 +48,6 @@ func (r *collectionRepository) FindByID(ctx context.Context, userID, collectionI
 	return &col, nil
 }
 
-// FindByUser finds all collections for a specific user.
 func (r *collectionRepository) FindByUser(ctx context.Context, userID primitive.ObjectID) ([]models.Collection, error) {
 	var results []models.Collection
 	collection := r.db.Client().Database("markly").Collection("collections")
@@ -69,7 +63,6 @@ func (r *collectionRepository) FindByUser(ctx context.Context, userID primitive.
 	return results, nil
 }
 
-// Update updates a collection's information in the database.
 func (r *collectionRepository) Update(ctx context.Context, userID, collectionID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error) {
 	collection := r.db.Client().Database("markly").Collection("collections")
 	filter := bson.M{"_id": collectionID, "user_id": userID}
@@ -81,7 +74,6 @@ func (r *collectionRepository) Update(ctx context.Context, userID, collectionID 
 	return result, nil
 }
 
-// Delete removes a collection from the database.
 func (r *collectionRepository) Delete(ctx context.Context, userID, collectionID primitive.ObjectID) (*mongo.DeleteResult, error) {
 	collection := r.db.Client().Database("markly").Collection("collections")
 	filter := bson.M{"_id": collectionID, "user_id": userID}

@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -14,8 +13,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 
-	"markly/internal/database"
 	"markly/internal/models"
+	"markly/internal/repositories"
 	"markly/internal/utils"
 )
 
@@ -29,40 +28,31 @@ type UserService interface {
 	GetTotalUsers(ctx context.Context) (int64, error)
 }
 
-// userService implements UserService using a MongoDB database.
+// userService implements UserService using a UserRepository.
 type userService struct {
-	db database.Service
+	userRepo        repositories.UserRepository
 	totalUsersGauge prometheus.Gauge
 }
 
 // NewUserService creates a new UserService.
-func NewUserService(db database.Service) UserService {
+func NewUserService(userRepo repositories.UserRepository) UserService {
 	s := &userService{
-		db: db,
+		userRepo: userRepo,
 		totalUsersGauge: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "app_total_users",
 			Help: "Total number of registered users in the application.",
 		}),
 	}
-
-	// Start a goroutine to periodically update the total users gauge
 	go s.updateTotalUsersPeriodically()
-
 	return s
 }
 
 func (s *userService) GetTotalUsers(ctx context.Context) (int64, error) {
-	collection := s.db.Client().Database("markly").Collection("users")
-	count, err := collection.CountDocuments(ctx, bson.M{})
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to count total users")
-		return 0, fmt.Errorf("failed to count total users: %w", err)
-	}
-	return count, nil
+	return s.userRepo.CountAll(ctx)
 }
 
 func (s *userService) updateTotalUsersPeriodically() {
-	ticker := time.NewTicker(30 * time.Second) // Update every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -93,43 +83,37 @@ func (s *userService) RegisterUser(ctx context.Context, user *models.User) (*mod
 	user.Password = string(hashedPassword)
 	user.ID = primitive.NewObjectID()
 
-	collection := s.db.Client().Database("markly").Collection("users")
+	// ToDo: This logic should be in the repository
+	// if err := utils.CreateUniqueIndex(collection, bson.M{"email": 1}, "Email"); err != nil {
+	// 	if strings.Contains(err.Error(), "already exists") {
+	// 		log.Warn().Err(err).Str("email", user.Email).Msg("Email already exists during index creation")
+	// 		return nil, fmt.Errorf("email already exists")
+	// 	}
+	// 	log.Error().Err(err).Msg("Error creating unique email index")
+	// 	return nil, fmt.Errorf("failed to set up database index")
+	// }
 
-	if err := utils.CreateUniqueIndex(collection, bson.M{"email": 1}, "Email"); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			log.Warn().Err(err).Str("email", user.Email).Msg("Email already exists during index creation")
-			return nil, fmt.Errorf("email already exists")
-		}
-		log.Error().Err(err).Msg("Error creating unique email index")
-		return nil, fmt.Errorf("failed to set up database index")
-	}
-
-	_, err = collection.InsertOne(ctx, user)
+	createdUser, err := s.userRepo.Create(ctx, user)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			log.Warn().Str("email", user.Email).Msg("Email already exists during user insertion")
 			return nil, fmt.Errorf("email already exists")
 		}
-		log.Error().Err(err).Str("email", user.Email).Msg("Failed to insert user into database")
-		return nil, fmt.Errorf("failed to create user")
+		return nil, err
 	}
 
-	user.Password = "" // Clear password before returning
-	log.Info().Str("user_id", user.ID.Hex()).Str("email", user.Email).Msg("User registered successfully")
+	createdUser.Password = "" // Clear password before returning
+	log.Info().Str("user_id", createdUser.ID.Hex()).Str("email", createdUser.Email).Msg("User registered successfully")
 
-	// Update the total users gauge immediately
 	if count, err := s.GetTotalUsers(ctx); err == nil {
 		s.totalUsersGauge.Set(float64(count))
 	}
-	return user, nil
+	return createdUser, nil
 }
 
 func (s *userService) LoginUser(ctx context.Context, creds *models.Login) (string, error) {
 	log.Debug().Str("email", creds.Email).Msg("Attempting user login")
-	collection := s.db.Client().Database("markly").Collection("users")
-
-	var user models.User
-	err := collection.FindOne(ctx, bson.M{"email": creds.Email}).Decode(&user)
+	user, err := s.userRepo.FindByEmail(ctx, creds.Email)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			log.Warn().Str("email", creds.Email).Msg("Invalid credentials during login attempt")
@@ -156,12 +140,7 @@ func (s *userService) LoginUser(ctx context.Context, creds *models.Login) (strin
 
 func (s *userService) GetUserProfile(ctx context.Context, userID primitive.ObjectID) (*models.User, error) {
 	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to retrieve user profile")
-	var user models.User
-	collection := s.db.Client().Database("markly").Collection("users")
-
-	filter := bson.M{"_id": userID}
-
-	err := collection.FindOne(ctx, filter).Decode(&user)
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			log.Warn().Str("user_id", userID.Hex()).Msg("User not found for GetMyProfile")
@@ -173,7 +152,7 @@ func (s *userService) GetUserProfile(ctx context.Context, userID primitive.Objec
 
 	user.Password = "" // Clear password before returning
 	log.Info().Str("user_id", userID.Hex()).Msg("User profile retrieved successfully")
-	return &user, nil
+	return user, nil
 }
 
 func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.ObjectID, updatePayload *models.UserProfileUpdate) (*models.User, error) {
@@ -183,18 +162,15 @@ func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.Ob
 		updateFields["username"] = updatePayload.Username
 	}
 	if updatePayload.Email != nil {
-		var currentUser models.User
-		err := s.db.Client().Database("markly").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&currentUser)
+		currentUser, err := s.userRepo.FindByID(ctx, userID)
 		if err != nil {
 			log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Failed to verify current user data for profile update")
 			return nil, fmt.Errorf("failed to verify current user data: %w", err)
 		}
 
 		if currentUser.Email != *updatePayload.Email {
-			var existingUser models.User
-			err := s.db.Client().Database("markly").Collection("users").
-				FindOne(ctx, bson.M{"email": *updatePayload.Email}).Decode(&existingUser)
-			if err == nil {
+			existingUser, err := s.userRepo.FindByEmail(ctx, *updatePayload.Email)
+			if err == nil && existingUser != nil {
 				log.Warn().Str("email", *updatePayload.Email).Msg("Email already in use by another account during profile update")
 				return nil, fmt.Errorf("email already in use by another account")
 			} else if err != mongo.ErrNoDocuments {
@@ -218,14 +194,9 @@ func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.Ob
 		return nil, fmt.Errorf("no valid fields provided for update")
 	}
 
-	filter := bson.M{"_id": userID}
-	update := bson.M{"$set": updateFields}
-
-	collection := s.db.Client().Database("markly").Collection("users")
-	result, err := collection.UpdateOne(ctx, filter, update)
+	result, err := s.userRepo.Update(ctx, userID, updateFields)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error updating user profile")
-		return nil, fmt.Errorf("failed to update user profile")
+		return nil, err
 	}
 
 	if result.MatchedCount == 0 {
@@ -233,8 +204,7 @@ func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.Ob
 		return nil, fmt.Errorf("user not found or not authorized to update")
 	}
 
-	var updatedUser models.User
-	err = collection.FindOne(ctx, filter).Decode(&updatedUser)
+	updatedUser, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error fetching updated user profile")
 		return nil, fmt.Errorf("failed to retrieve updated user profile")
@@ -242,28 +212,23 @@ func (s *userService) UpdateUserProfile(ctx context.Context, userID primitive.Ob
 	updatedUser.Password = ""
 
 	log.Info().Str("user_id", userID.Hex()).Msg("User profile updated successfully")
-	return &updatedUser, nil
+	return updatedUser, nil
 }
 
 func (s *userService) DeleteUser(ctx context.Context, userID primitive.ObjectID) error {
 	log.Debug().Str("userID", userID.Hex()).Msg("Attempting to delete user account")
-	collection := s.db.Client().Database("markly").Collection("users")
-
-	filter := bson.M{"_id": userID}
-	deleteResult, err := collection.DeleteOne(ctx, filter)
+	result, err := s.userRepo.Delete(ctx, userID)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID.Hex()).Msg("Error deleting user account")
-		return fmt.Errorf("failed to delete account")
+		return err
 	}
 
-	if deleteResult.DeletedCount == 0 {
+	if result.DeletedCount == 0 {
 		log.Warn().Str("user_id", userID.Hex()).Msg("User account not found or not authorized to delete")
 		return fmt.Errorf("user account not found or not authorized to delete")
 	}
 
 	log.Info().Str("user_id", userID.Hex()).Msg("User account deleted successfully")
 
-	// Update the total users gauge immediately
 	if count, err := s.GetTotalUsers(ctx); err == nil {
 		s.totalUsersGauge.Set(float64(count))
 	}

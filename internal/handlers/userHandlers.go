@@ -10,7 +10,6 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	"markly/internal/metrics"
 	"markly/internal/models"
 	"markly/internal/services"
 	"markly/internal/utils"
@@ -45,7 +44,6 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics.NewUsersTotal.Inc()
 	utils.RespondWithJSON(w, http.StatusCreated, registeredUser)
 }
 
@@ -64,12 +62,10 @@ func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(err.Error(), "invalid credentials") {
 			statusCode = http.StatusUnauthorized
 		}
-		metrics.LoginAttemptsTotal.WithLabelValues("failed").Inc()
 		utils.RespondWithError(w, statusCode, err.Error())
 		return
 	}
 
-	metrics.LoginAttemptsTotal.WithLabelValues("success").Inc()
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 

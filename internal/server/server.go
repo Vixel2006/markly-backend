@@ -15,6 +15,7 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"markly/internal/database"
+	"markly/internal/middlewares"
 	"markly/internal/repositories"
 	"markly/internal/services"
 )
@@ -71,6 +72,8 @@ func NewServer() *Server {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+
+	go middlewares.CleanupVisitors()
 
 	return s
 }

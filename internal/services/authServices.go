@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/sessions"
 	"github.com/markbates/goth"
@@ -26,6 +27,7 @@ const (
 
 type AuthService interface {
 	HandleLogin(ctx context.Context, u goth.User) (string, error)
+	ResetPassword(ctx context.Context, email, newPassword string) error
 }
 
 type authService struct {
@@ -100,4 +102,34 @@ func (a *authService) HandleLogin(ctx context.Context, u goth.User) (string, err
 	log.Info().Str("userID", user.ID.Hex()).Msg("JWT generated successfully")
 
 	return token, nil
+}
+
+func (a *authService) ResetPassword(ctx context.Context, email, newPassword string) error {
+	user, err := a.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("user not found")
+	}
+
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	user.Password = hashedPassword
+	user.UpdatedAt = time.Now()
+
+	updateFields := map[string]interface{}{
+		"password":   user.Password,
+		"updated_at": user.UpdatedAt,
+	}
+
+	_, err = a.userRepo.Update(ctx, user.ID, updateFields)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

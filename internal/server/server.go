@@ -31,6 +31,7 @@ type Server struct {
 	tagService        services.TagService
 	agentService      *services.AgentService
 	authService       services.AuthService
+	otpService        services.OTPService
 }
 
 func NewServer() *Server {
@@ -48,8 +49,11 @@ func NewServer() *Server {
 	categoryRepo := repositories.NewCategoryRepository(db)
 	collectionRepo := repositories.NewCollectionRepository(db)
 	tagRepo := repositories.NewTagRepository(db)
+	otpRepo := repositories.NewOTPRepository(db.Client().Database("markly"), userRepo)
 
+	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo)
+	otpService := services.NewOTPService(userRepo, otpRepo, emailService)
 
 	s := &Server{
 		port:              port,
@@ -61,6 +65,7 @@ func NewServer() *Server {
 		tagService:        services.NewTagService(tagRepo),
 		agentService:      services.NewAgentService(bookmarkRepo, categoryRepo, collectionRepo, tagRepo),
 		authService:       authService,
+		otpService:        otpService,
 	}
 
 	services.InitializeGoth()

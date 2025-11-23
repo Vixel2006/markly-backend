@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -8,14 +9,42 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"markly/internal/services"
+	"markly/internal/utils"
 )
 
 type AuthHandler struct {
 	authService services.AuthService
+	otpService  services.OTPService
 }
 
-func NewAuthHandler(AuthService services.AuthService) *AuthHandler {
-	return &AuthHandler{authService: AuthService}
+func NewAuthHandler(AuthService services.AuthService, otpService services.OTPService) *AuthHandler {
+	return &AuthHandler{authService: AuthService, otpService: otpService}
+}
+
+type SendOTPRequest struct {
+	Email string `json:"email"`
+}
+
+func (a *AuthHandler) SendOTPHandler(w http.ResponseWriter, r *http.Request) {
+	var req SendOTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.Email == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+
+	err := a.otpService.SendOTP(r.Context(), req.Email)
+	if err != nil {
+		log.Error().Err(err).Str("email", req.Email).Msg("Failed to send OTP")
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to send OTP")
+		return
+	}
+
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"message": "OTP sent successfully"})
 }
 
 func (a *AuthHandler) ProviderAuth(w http.ResponseWriter, r *http.Request) {

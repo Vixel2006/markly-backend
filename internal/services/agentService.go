@@ -81,7 +81,7 @@ func (s *AgentService) GetPromptBookmarkInfo(userID primitive.ObjectID, bookmark
 		filter["tags_id"] = bson.M{"$in": *bookmarkFilter.TagID}
 	}
 
-	recentBookmarks, err := s.bookmarkRepo.FindWithLimit(context.Background(), filter, 3)
+	recentBookmarks, err := s.bookmarkRepo.Find(context.Background(), filter, 3, 0)
 	if err != nil {
 		log.Error().Err(err).Str("userID", userID.Hex()).Interface("filter", filter).Msg("Failed to fetch recent bookmarks")
 		return nil, err

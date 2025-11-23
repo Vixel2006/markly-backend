@@ -37,7 +37,7 @@ func NewServer() *Server {
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		log.Fatal().Err(err).Str("port", portStr).Msgf("Invalid PORT environment variable. Using default 8080.")
-		port = 8080 // Default port
+		port = 8080
 	}
 
 	db := database.New()

@@ -13,6 +13,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r := mux.NewRouter()
 
 	r.Use(middlewares.CorsMiddleware)
+	r.Use(middlewares.RateLimit)
 
 	ch := handlers.NewCommonHandler(s.db)
 	r.HandleFunc("/", ch.HelloWorldHandler)

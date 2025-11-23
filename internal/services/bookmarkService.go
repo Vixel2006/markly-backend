@@ -90,7 +90,15 @@ func (s *bookmarkServiceImpl) GetBookmarks(ctx context.Context, userID primitive
 		return nil, err
 	}
 
-	bookmarks, err := s.bookmarkRepo.Find(ctx, filter)
+	var limit int64 = 5
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+
+	if err != nil {
+		log.Error().Err(err).Msg("Page Query should be an integer")
+		return nil, err
+	}
+
+	bookmarks, err := s.bookmarkRepo.Find(ctx, filter, limit, int64(page))
 	if err != nil {
 		log.Error().Err(err).Str("userID", userID.Hex()).Interface("filter", filter).Msg("Error finding bookmarks")
 		return nil, err

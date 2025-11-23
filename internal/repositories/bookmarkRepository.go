@@ -15,9 +15,8 @@ import (
 
 type BookmarkRepository interface {
 	Create(ctx context.Context, bm *models.Bookmark) (*models.Bookmark, error)
-	Find(ctx context.Context, filter bson.M) ([]models.Bookmark, error)
+	Find(ctx context.Context, filter bson.M, limit, page int64) ([]models.Bookmark, error)
 	FindOne(ctx context.Context, filter bson.M) (*models.Bookmark, error)
-	FindWithLimit(ctx context.Context, filter bson.M, limit int64) ([]models.Bookmark, error)
 	UpdateOne(ctx context.Context, filter bson.M, update bson.M) (*mongo.UpdateResult, error)
 	DeleteOne(ctx context.Context, filter bson.M) (*mongo.DeleteResult, error)
 }
@@ -40,9 +39,12 @@ func (r *bookmarkRepository) Create(ctx context.Context, bm *models.Bookmark) (*
 	return bm, nil
 }
 
-func (r *bookmarkRepository) Find(ctx context.Context, filter bson.M) ([]models.Bookmark, error) {
+func (r *bookmarkRepository) Find(ctx context.Context, filter bson.M, limit, page int64) ([]models.Bookmark, error) {
 	collection := r.db.Client().Database("markly").Collection("bookmarks")
-	cursor, err := collection.Find(ctx, filter)
+	opts := options.Find().SetLimit(limit).SetSkip((page - 1) * limit)
+
+	cursor, err := collection.Find(ctx, filter, opts)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve bookmarks: %w", err)
 	}
@@ -63,22 +65,6 @@ func (r *bookmarkRepository) FindOne(ctx context.Context, filter bson.M) (*model
 		return nil, err
 	}
 	return &bm, nil
-}
-
-func (r *bookmarkRepository) FindWithLimit(ctx context.Context, filter bson.M, limit int64) ([]models.Bookmark, error) {
-	collection := r.db.Client().Database("markly").Collection("bookmarks")
-	opts := options.Find().SetLimit(limit)
-	cursor, err := collection.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recent bookmarks: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var bookmarks []models.Bookmark
-	if err = cursor.All(ctx, &bookmarks); err != nil {
-		return nil, fmt.Errorf("failed to decode recent bookmarks: %w", err)
-	}
-	return bookmarks, nil
 }
 
 func (r *bookmarkRepository) UpdateOne(ctx context.Context, filter bson.M, update bson.M) (*mongo.UpdateResult, error) {

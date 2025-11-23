@@ -29,6 +29,7 @@ type Server struct {
 	collectionService services.CollectionService
 	tagService        services.TagService
 	agentService      *services.AgentService
+	authService       services.AuthService
 }
 
 func NewServer() *Server {
@@ -47,6 +48,8 @@ func NewServer() *Server {
 	collectionRepo := repositories.NewCollectionRepository(db)
 	tagRepo := repositories.NewTagRepository(db)
 
+	authService := services.NewAuthService(userRepo)
+
 	s := &Server{
 		port:              port,
 		db:                db,
@@ -56,7 +59,10 @@ func NewServer() *Server {
 		collectionService: services.NewCollectionService(collectionRepo),
 		tagService:        services.NewTagService(tagRepo),
 		agentService:      services.NewAgentService(bookmarkRepo, categoryRepo, collectionRepo, tagRepo),
+		authService:       authService,
 	}
+
+	services.InitializeGoth()
 
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),

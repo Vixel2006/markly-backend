@@ -40,12 +40,18 @@ func (s *Server) registerBookmarkRoutes(r *mux.Router) {
 
 func (s *Server) registerAuthRoutes(r *mux.Router) {
 	uh := handlers.NewUserHandler(s.userService)
+	ah := handlers.NewAuthHandler(s.authService)
 
 	r.HandleFunc("/api/auth/register", uh.Register).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/login", uh.Login).Methods("POST", "OPTIONS")
 	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.GetMyProfile))).Methods("GET", "OPTIONS")
 	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.UpdateMyProfile))).Methods("PATCH", "PUT", "OPTIONS")
 	r.Handle("/api/me", middlewares.AuthMiddleware(http.HandlerFunc(uh.DeleteMyProfile))).Methods("DELETE", "OPTIONS")
+
+	r.HandleFunc("/api/auth/{provider}", ah.ProviderAuth).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/auth/{provider}/callback", ah.ProviderCallback).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/auth/success", ah.AuthSuccess).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/auth/error", ah.AuthError).Methods("GET", "OPTIONS")
 }
 
 func (s *Server) registerCategoryRoutes(r *mux.Router) {

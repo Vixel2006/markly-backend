@@ -38,11 +38,11 @@ type AddBookmarkRequestBody struct {
 }
 
 type UpdateBookmarkRequestBody struct {
-	URL           *string  `json:"url,omitempty"`
-	Title         *string  `json:"title,omitempty"`
-	Summary       *string  `json:"summary,omitempty"`
-	Tags          *[]string `json:"tags,omitempty"`
-	Collections   *[]string `json:"collections,omitempty"`
-	CategoryID    *string  `json:"category_id,omitempty"`
-	IsFav         *bool    `json:"is_fav,omitempty"`
+	URL         *string   `json:"url,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+	Summary     *string   `json:"summary,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
+	Collections *[]string `json:"collections,omitempty"`
+	CategoryID  *string   `json:"category_id,omitempty"`
+	IsFav       *bool     `json:"is_fav,omitempty"`
 }

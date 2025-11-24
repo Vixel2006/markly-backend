@@ -7,23 +7,19 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-
 	"markly/internal/models"
 	"markly/internal/repositories"
 	"markly/internal/utils"
 )
 
 const (
-	OTPExpirationMinutes     = 10
-	OTPPurposeForgotPassword = "forgot_password"
+	OTPExpirationMinutes    = 10
+	OTPPurposeResetPassword = "reset_password"
 )
 
 type OTPService interface {
 	GenerateOTPForgotPassword(ctx context.Context, email string) (string, error)
-	VerifyOTPForgotPassword(ctx context.Context, email, otpCode string) (*models.User, error)
-	ResetPassword(ctx context.Context, userID, newPassword string) error
+	VerifyOTP(ctx context.Context, email, otpCode string) error
 	SendOTP(ctx context.Context, email string) error
 }
 
@@ -46,7 +42,7 @@ func (s *otpService) GenerateOTPForgotPassword(ctx context.Context, email string
 		return "", errors.New("user not found")
 	}
 
-	otpCode, err := generateSecureOTP(6)
+	otpCode, err := utils.GenerateSecureOTP(6)
 	if err != nil {
 		return "", err
 	}
@@ -56,7 +52,7 @@ func (s *otpService) GenerateOTPForgotPassword(ctx context.Context, email string
 	otp := &models.OTP{
 		UserID:    user.ID,
 		OTPCode:   otpCode,
-		Purpose:   OTPPurposeForgotPassword,
+		Purpose:   OTPPurposeResetPassword,
 		ExpiresAt: expiresAt,
 		IsUsed:    false,
 	}
@@ -76,62 +72,8 @@ func (s *otpService) GenerateOTPForgotPassword(ctx context.Context, email string
 	return otpCode, nil
 }
 
-func generateSecureOTP(length int) (string, error) {
-	const otpChars = "0123456789"
-	buffer := make([]byte, length)
-	_, err := rand.Read(buffer)
-	if err != nil {
-		return "", err
-	}
-
-	otpCharsLength := len(otpChars)
-	for i := 0; i < length; i++ {
-		buffer[i] = otpChars[int(buffer[i])%otpCharsLength]
-	}
-
-	return string(buffer), nil
-}
-
-func (s *otpService) VerifyOTPForgotPassword(ctx context.Context, email, otpCode string) (*models.User, error) {
+func (s *otpService) VerifyOTP(ctx context.Context, email, otpCode string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
-	if err != nil {
-		return nil, err
-	}
-	if user == nil {
-		return nil, errors.New("user not found")
-	}
-
-	otp, err := s.otpRepo.FindByUserIDAndOTPCode(ctx, user.ID, otpCode, OTPPurposeForgotPassword)
-	if err != nil {
-		return nil, err
-	}
-	if otp == nil {
-		return nil, errors.New("invalid or expired OTP")
-	}
-
-	if otp.IsUsed {
-		return nil, errors.New("OTP already used")
-	}
-
-	if time.Now().After(otp.ExpiresAt) {
-		return nil, errors.New("OTP expired")
-	}
-
-	err = s.otpRepo.MarkAsUsed(ctx, otp.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	return user, nil
-}
-
-func (s *otpService) ResetPassword(ctx context.Context, userID, newPassword string) error {
-	objID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return err
-	}
-
-	user, err := s.userRepo.FindByID(ctx, objID)
 	if err != nil {
 		return err
 	}
@@ -139,20 +81,23 @@ func (s *otpService) ResetPassword(ctx context.Context, userID, newPassword stri
 		return errors.New("user not found")
 	}
 
-	hashedPassword, err := utils.HashPassword(newPassword)
+	otp, err := s.otpRepo.FindByUserIDAndOTPCode(ctx, user.ID, otpCode, OTPPurposeResetPassword)
 	if err != nil {
 		return err
 	}
-
-	user.Password = hashedPassword
-	user.UpdatedAt = time.Now()
-
-	updateFields := bson.M{
-		"password":   user.Password,
-		"updated_at": user.UpdatedAt,
+	if otp == nil {
+		return errors.New("invalid or expired OTP")
 	}
 
-	_, err = s.userRepo.Update(ctx, user.ID, updateFields)
+	if otp.IsUsed {
+		return errors.New("OTP already used")
+	}
+
+	if time.Now().After(otp.ExpiresAt) {
+		return errors.New("OTP expired")
+	}
+
+	err = s.otpRepo.MarkAsUsed(ctx, otp.ID)
 	if err != nil {
 		return err
 	}
@@ -169,7 +114,7 @@ func (s *otpService) SendOTP(ctx context.Context, email string) error {
 		return errors.New("user not found")
 	}
 
-	otpCode, err := generateSecureOTP(6)
+	otpCode, err := utils.GenerateSecureOTP(6)
 	if err != nil {
 		return err
 	}
@@ -189,7 +134,6 @@ func (s *otpService) SendOTP(ctx context.Context, email string) error {
 		return err
 	}
 
-	// Send OTP via email
 	subject := "Your One-Time Password"
 	body := fmt.Sprintf("Your One-Time Password is: %s", otpCode)
 	err = s.emailService.SendEmail(email, subject, body)

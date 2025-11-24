@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-
 	"github.com/rs/zerolog/log"
 
 	_ "github.com/joho/godotenv/autoload"

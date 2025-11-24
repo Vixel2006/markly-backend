@@ -1,15 +1,15 @@
 services:
-  markly-backend:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3001:8080"
+      - "8080:8080"
     environment:
-      MONGO_URI: "mongodb://mongo_bp:27017"
-      BLUEPRINT_DB_USERNAME: ${BLUEPRINT_DB_USERNAME}
-      BLUEPRINT_DB_ROOT_PASSWORD: ${BLUEPRINT_DB_ROOT_PASSWORD}
+      BLUEPRINT_DB_HOST: mongo_bp
+      BLUEPRINT_DB_PORT: 27017
       PORT: 8080
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       - mongo_bp
     volumes:
@@ -19,14 +19,67 @@ services:
   mongo_bp:
     image: mongo:latest
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${BLUEPRINT_DB_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${BLUEPRINT_DB_ROOT_PASSWORD}
     ports:
       - "27018:27017"
     volumes:
       - mongo_volume_bp:/data/db
 
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards/default:/etc/grafana/provisioning/dashboards/default
+
+
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
 volumes:
   mongo_volume_bp:
   backend_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:

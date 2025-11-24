@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"markly/internal/handlers"
 	"markly/internal/middlewares"
@@ -14,10 +15,13 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	r.Use(middlewares.CorsMiddleware)
 	r.Use(middlewares.RateLimit)
+	r.Use(middlewares.PrometheusMiddleware)
 
 	ch := handlers.NewCommonHandler(s.db)
 	r.HandleFunc("/", ch.HelloWorldHandler)
 	r.HandleFunc("/health", ch.HealthHandler)
+
+	r.Handle("/metrics", promhttp.Handler())
 
 	s.registerBookmarkRoutes(r)
 	s.registerAuthRoutes(r)

@@ -11,7 +11,6 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"markly/internal/database"
 )
 
 // parseObjectIDs helper function to parse comma-separated ObjectID strings
@@ -32,12 +31,12 @@ func ParseObjectIDs(idsStr string) ([]primitive.ObjectID, error) {
 }
 
 // ValidateReferences checks if the provided ObjectIDs for tags, collections, and categories exist and belong to the user.
-func ValidateReferences(db database.Service, userID primitive.ObjectID, tagIDs []primitive.ObjectID, collectionIDs []primitive.ObjectID, categoryID *primitive.ObjectID) error {
+func ValidateReferences(client *mongo.Client, userID primitive.ObjectID, tagIDs []primitive.ObjectID, collectionIDs []primitive.ObjectID, categoryID *primitive.ObjectID) error {
 	ctx := context.Background()
 
 	// Validate tags
 	if len(tagIDs) > 0 {
-		tagsCollection := db.Client().Database("markly").Collection("tags")
+		tagsCollection := client.Database("markly").Collection("tags")
 		count, err := tagsCollection.CountDocuments(ctx, bson.M{
 			"_id":     bson.M{"$in": tagIDs},
 			"user_id": userID,
@@ -52,7 +51,7 @@ func ValidateReferences(db database.Service, userID primitive.ObjectID, tagIDs [
 
 	// Validate collections
 	if len(collectionIDs) > 0 {
-		collectionsCollection := db.Client().Database("markly").Collection("collections")
+		collectionsCollection := client.Database("markly").Collection("collections")
 		count, err := collectionsCollection.CountDocuments(ctx, bson.M{
 			"_id":     bson.M{"$in": collectionIDs},
 			"user_id": userID,
@@ -67,7 +66,7 @@ func ValidateReferences(db database.Service, userID primitive.ObjectID, tagIDs [
 
 	// Validate category
 	if categoryID != nil {
-		categoriesCollection := db.Client().Database("markly").Collection("categories")
+		categoriesCollection := client.Database("markly").Collection("categories")
 		count, err := categoriesCollection.CountDocuments(ctx, bson.M{
 			"_id":     *categoryID,
 			"user_id": userID,

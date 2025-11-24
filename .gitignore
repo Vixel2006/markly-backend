@@ -37,3 +37,7 @@ main
 
 # Build file
 api
+
+# Grafana
+grafana/data/
+grafana/logs/

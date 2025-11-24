@@ -154,7 +154,7 @@ func (s *bookmarkServiceImpl) AddBookmark(ctx context.Context, userID primitive.
 		categoryObjectIDPtr = &catID
 	}
 
-	if err := utils.ValidateReferences(s.db, userID, tagsObjectIDs, collectionsObjectIDs, categoryObjectIDPtr); err != nil {
+	if err := utils.ValidateReferences(s.db.Client(), userID, tagsObjectIDs, collectionsObjectIDs, categoryObjectIDPtr); err != nil {
 		log.Warn().Err(err).Str("userID", userID.Hex()).Msg("Invalid reference during AddBookmark")
 		return nil, fmt.Errorf("invalid reference: %w", err)
 	}
@@ -245,7 +245,7 @@ func (s *bookmarkServiceImpl) buildUpdateFields(updatePayload models.UpdateBookm
 			}
 			tagsObjectIDs = append(tagsObjectIDs, objID)
 		}
-		if err := utils.ValidateReferences(s.db, userID, tagsObjectIDs, nil, nil); err != nil {
+		if err := utils.ValidateReferences(s.db.Client(), userID, tagsObjectIDs, nil, nil); err != nil {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Msg("Invalid tag reference during buildUpdateFields")
 			return nil, fmt.Errorf("invalid tag reference: %w", err)
 		}
@@ -266,7 +266,7 @@ func (s *bookmarkServiceImpl) buildUpdateFields(updatePayload models.UpdateBookm
 			}
 			collectionsObjectIDs = append(collectionsObjectIDs, objID)
 		}
-		if err := utils.ValidateReferences(s.db, userID, nil, collectionsObjectIDs, nil); err != nil {
+		if err := utils.ValidateReferences(s.db.Client(), userID, nil, collectionsObjectIDs, nil); err != nil {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Msg("Invalid collection reference during buildUpdateFields")
 			return nil, fmt.Errorf("invalid collection reference: %w", err)
 		}
@@ -289,7 +289,7 @@ func (s *bookmarkServiceImpl) buildUpdateFields(updatePayload models.UpdateBookm
 			categoryObjectIDPtr = &objID
 		}
 
-		if err := utils.ValidateReferences(s.db, userID, nil, nil, categoryObjectIDPtr); err != nil {
+		if err := utils.ValidateReferences(s.db.Client(), userID, nil, nil, categoryObjectIDPtr); err != nil {
 			log.Warn().Err(err).Str("userID", userID.Hex()).Msg("Invalid category reference during buildUpdateFields")
 			return nil, fmt.Errorf("invalid category reference: %w", err)
 		}

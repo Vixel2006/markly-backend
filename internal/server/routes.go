@@ -29,6 +29,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	s.registerCollectionRoutes(r)
 	s.registerCategoryRoutes(r)
 	s.registerAgentRoutes(r)
+	s.registerAnalyticsRoutes(r) // New: Register analytics routes
 
 	return r
 }
@@ -93,4 +94,13 @@ func (s *Server) registerAgentRoutes(r *mux.Router) {
 	r.Handle("/api/agent/summarize/{id}", middlewares.AuthMiddleware(http.HandlerFunc(ah.GenerateSummary))).Methods("POST", "OPTIONS")
 	r.Handle("/api/agent/summarize-url", middlewares.AuthMiddleware(http.HandlerFunc(ah.SummarizeURL))).Methods("POST", "OPTIONS")
 	r.Handle("/api/agent/suggestions", middlewares.AuthMiddleware(http.HandlerFunc(ah.GenerateAISuggestions))).Methods("GET", "OPTIONS")
+}
+
+func (s *Server) registerAnalyticsRoutes(r *mux.Router) {
+	// All analytics routes should be protected by AuthMiddleware
+	r.Handle("/api/analytics/users/growth", middlewares.AuthMiddleware(http.HandlerFunc(s.analyticsHandlers.GetUserGrowth))).Methods("GET", "OPTIONS")
+	r.Handle("/api/analytics/bookmarks/activity", middlewares.AuthMiddleware(http.HandlerFunc(s.analyticsHandlers.GetBookmarkActivity))).Methods("GET", "OPTIONS")
+	r.Handle("/api/analytics/bookmarks/engagement", middlewares.AuthMiddleware(http.HandlerFunc(s.analyticsHandlers.GetBookmarkEngagement))).Methods("GET", "OPTIONS")
+	r.Handle("/api/analytics/tags/trends", middlewares.AuthMiddleware(http.HandlerFunc(s.analyticsHandlers.GetTagTrends))).Methods("GET", "OPTIONS")
+	r.Handle("/api/analytics/trending/items", middlewares.AuthMiddleware(http.HandlerFunc(s.analyticsHandlers.GetTrendingItems))).Methods("GET", "OPTIONS")
 }

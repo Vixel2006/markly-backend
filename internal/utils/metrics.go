@@ -49,6 +49,6 @@ var DBQueryErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 }, []string{"query_type", "repository"})
 
 func RegisterMetrics() {
-	// NOTE: All metrics are registered automatically by promauto.New* functions.
-	// This function can be used for any additional setup or explicit registration if needed.
+	prometheus.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	prometheus.MustRegister(prometheus.NewGoCollector())
 }

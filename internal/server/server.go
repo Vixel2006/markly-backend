@@ -18,6 +18,7 @@ import (
 	"markly/internal/middlewares"
 	"markly/internal/repositories"
 	"markly/internal/services"
+	"markly/internal/handlers"
 )
 
 type Server struct {
@@ -32,6 +33,8 @@ type Server struct {
 	agentService      *services.AgentService
 	authService       services.AuthService
 	otpService        services.OTPService
+	analyticsService  *services.AnalyticsService
+	analyticsHandlers *handlers.AnalyticsHandlers
 }
 
 func NewServer() *Server {
@@ -50,10 +53,17 @@ func NewServer() *Server {
 	collectionRepo := repositories.NewCollectionRepository(db)
 	tagRepo := repositories.NewTagRepository(db)
 	otpRepo := repositories.NewOTPRepository(db.Client().Database("markly"), userRepo)
+	trendingRepo := repositories.NewTrendingRepository(db) // New: Trending Repository
 
 	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo)
 	otpService := services.NewOTPService(userRepo, otpRepo, emailService)
+	analyticsService := services.NewAnalyticsService( // New: Analytics Service
+		&userRepo,
+		&bookmarkRepo,
+		&tagRepo,
+		&trendingRepo,
+	)
 
 	s := &Server{
 		port:              port,
@@ -66,6 +76,8 @@ func NewServer() *Server {
 		agentService:      services.NewAgentService(bookmarkRepo, categoryRepo, collectionRepo, tagRepo),
 		authService:       authService,
 		otpService:        otpService,
+		analyticsService:  analyticsService, // New: Assign Analytics Service
+		analyticsHandlers: handlers.NewAnalyticsHandlers(analyticsService), // New: Assign Analytics Handlers
 	}
 
 	services.InitializeGoth()

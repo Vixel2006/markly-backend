@@ -1,0 +1,20 @@
+groups:
+  - name: MarklyBackendAlerts
+    rules:
+      - alert: HighProcessCPUUsage
+        expr: rate(process_cpu_seconds_total{job="markly-backend"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage by Markly Backend process on {{ $labels.instance }}"
+          description: "Markly Backend process CPU usage is {{ printf "%.2f" $value }} (cores) on {{ $labels.instance }}. This is above the 0.8 core threshold for 5 minutes."
+
+      - alert: HighProcessMemoryUsage
+        expr: process_virtual_memory_bytes{job="markly-backend"} > 500 * 1024 * 1024 # 500 MB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory usage by Markly Backend process on {{ $labels.instance }}"
+          description: "Markly Backend process virtual memory usage is {{ humanize $value }} on {{ $labels.instance }}. This is above the 500 MB threshold for 5 minutes."

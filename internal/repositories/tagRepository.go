@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -11,6 +12,7 @@ import (
 
 	"markly/internal/database"
 	"markly/internal/models"
+	"markly/internal/utils"
 )
 
 type TagRepository interface {
@@ -19,6 +21,7 @@ type TagRepository interface {
 	FindByUser(ctx context.Context, userID primitive.ObjectID) ([]models.Tag, error)
 	Update(ctx context.Context, userID, tagID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error)
 	Delete(ctx context.Context, userID, tagID primitive.ObjectID) (*mongo.DeleteResult, error)
+	FindAll(ctx context.Context) ([]models.Tag, error)
 }
 
 type tagRepository struct {
@@ -85,4 +88,32 @@ func (r *tagRepository) Delete(ctx context.Context, userID, tagID primitive.Obje
 		return nil, fmt.Errorf("failed to delete tag: %w", err)
 	}
 	return result, nil
+}
+
+func (r *tagRepository) FindAll(ctx context.Context) ([]models.Tag, error) {
+	queryType := "findAll"
+	repository := "tag"
+	status := "success"
+	// Prometheus timer for query duration
+	timer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		utils.DBQueryDurationSeconds.WithLabelValues(queryType, repository, status).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
+	var tags []models.Tag
+	collection := r.db.Client().Database("markly").Collection("tags")
+	cursor, err := collection.Find(ctx, bson.M{})
+	if err != nil {
+		status = "error"
+		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
+		return nil, fmt.Errorf("failed to retrieve all tags: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	if err := cursor.All(ctx, &tags); err != nil {
+		status = "error"
+		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
+		return nil, fmt.Errorf("error decoding all tags: %w", err)
+	}
+	return tags, nil
 }

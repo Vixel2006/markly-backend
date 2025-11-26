@@ -21,6 +21,8 @@ type BookmarkRepository interface {
 	FindOne(ctx context.Context, filter bson.M) (*models.Bookmark, error)
 	UpdateOne(ctx context.Context, filter bson.M, update bson.M) (*mongo.UpdateResult, error)
 	DeleteOne(ctx context.Context, filter bson.M) (*mongo.DeleteResult, error)
+	CountBookmarksCreatedBetween(ctx context.Context, startDate, endDate interface{}) (int64, error)
+	CountFavoriteBookmarks(ctx context.Context, userID primitive.ObjectID) (int64, error)
 }
 
 type bookmarkRepository struct {
@@ -137,4 +139,52 @@ func (r *bookmarkRepository) DeleteOne(ctx context.Context, filter bson.M) (*mon
 		return nil, fmt.Errorf("failed to delete bookmark: %w", err)
 	}
 	return deleteResult, nil
+}
+
+func (r *bookmarkRepository) CountBookmarksCreatedBetween(ctx context.Context, startDate, endDate interface{}) (int64, error) {
+	queryType := "countBookmarksCreatedBetween"
+	repository := "bookmark"
+	status := "success"
+	timer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		utils.DBQueryDurationSeconds.WithLabelValues(queryType, repository, status).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
+	collection := r.db.Client().Database("markly").Collection("bookmarks")
+	filter := bson.M{
+		"createdAt": bson.M{
+			"$gte": startDate,
+			"$lte": endDate,
+		},
+	}
+	count, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		status = "error"
+		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
+		return 0, fmt.Errorf("failed to count bookmarks created between dates: %w", err)
+	}
+	return count, nil
+}
+
+func (r *bookmarkRepository) CountFavoriteBookmarks(ctx context.Context, userID primitive.ObjectID) (int64, error) {
+	queryType := "countFavoriteBookmarks"
+	repository := "bookmark"
+	status := "success"
+	timer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		utils.DBQueryDurationSeconds.WithLabelValues(queryType, repository, status).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
+	collection := r.db.Client().Database("markly").Collection("bookmarks")
+	filter := bson.M{
+		"userID": userID,
+		"isFav":  true,
+	}
+	count, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		status = "error"
+		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
+		return 0, fmt.Errorf("failed to count favorite bookmarks for user %s: %w", userID.Hex(), err)
+	}
+	return count, nil
 }

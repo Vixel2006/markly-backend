@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus" // Added for Prometheus
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -12,7 +12,7 @@ import (
 
 	"markly/internal/database"
 	"markly/internal/models"
-	"markly/internal/utils" // Added for Prometheus metrics
+	"markly/internal/utils"
 )
 
 type UserRepository interface {
@@ -22,6 +22,7 @@ type UserRepository interface {
 	Update(ctx context.Context, userID primitive.ObjectID, updateFields bson.M) (*mongo.UpdateResult, error)
 	Delete(ctx context.Context, userID primitive.ObjectID) (*mongo.DeleteResult, error)
 	CountAll(ctx context.Context) (int64, error)
+	CountUsersCreatedBetween(ctx context.Context, startDate, endDate interface{}) (int64, error)
 }
 
 type userRepository struct {
@@ -150,6 +151,32 @@ func (r *userRepository) CountAll(ctx context.Context) (int64, error) {
 		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
 		log.Error().Err(err).Msg("Failed to count total users")
 		return 0, fmt.Errorf("failed to count total users: %w", err)
+	}
+	return count, nil
+}
+
+func (r *userRepository) CountUsersCreatedBetween(ctx context.Context, startDate, endDate interface{}) (int64, error) {
+	queryType := "countUsersCreatedBetween"
+	repository := "user"
+	status := "success"
+	timer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		utils.DBQueryDurationSeconds.WithLabelValues(queryType, repository, status).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
+	collection := r.db.Client().Database("markly").Collection("users")
+	filter := bson.M{
+		"createdAt": bson.M{
+			"$gte": startDate,
+			"$lte": endDate,
+		},
+	}
+	count, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		status = "error"
+		utils.DBQueryErrorsTotal.WithLabelValues(queryType, repository).Inc()
+		log.Error().Err(err).Msg("Failed to count users created between dates")
+		return 0, fmt.Errorf("failed to count users created between dates: %w", err)
 	}
 	return count, nil
 }

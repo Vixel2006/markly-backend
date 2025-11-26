@@ -157,7 +157,58 @@ Example (409 Conflict):
     *   `401 Unauthorized`: Invalid credentials.
     *   `500 Internal Server Error`: Failed to generate token.
 
-#### 2.3. Get My Profile
+#### 2.3. Forgot Password
+
+*   **URL:** `/api/auth/forgot-password`
+*   **Method:** `POST`
+*   **Description:** Initiates the password reset process by sending a One-Time Password (OTP) to the user's registered email.
+*   **Authentication:** None
+*   **Request Body:** `application/json`
+    ```json
+    {
+      "email": "john.doe@example.com"
+    }
+    ```
+    *   `email` (string, required): The user's email address.
+*   **Success Response (200 OK):**
+    ```json
+    {
+      "message": "Password reset OTP sent successfully"
+    }
+    ```
+*   **Error Responses:**
+    *   `400 Bad Request`: Invalid request payload or missing email.
+    *   `500 Internal Server Error`: Failed to generate and send OTP.
+
+#### 2.4. Reset Password
+
+*   **URL:** `/api/auth/reset-password`
+*   **Method:** `POST`
+*   **Description:** Resets the user's password using a valid OTP.
+*   **Authentication:** None
+*   **Request Body:** `application/json`
+    ```json
+    {
+      "email": "john.doe@example.com",
+      "otp": "123456",
+      "new_password": "newsecurepassword123"
+    }
+    ```
+    *   `email` (string, required): The user's email address.
+    *   `otp` (string, required): The One-Time Password received by email.
+    *   `new_password` (string, required): The new password for the user.
+*   **Success Response (200 OK):**
+    ```json
+    {
+      "message": "Password reset successfully"
+    }
+    ```
+*   **Error Responses:**
+    *   `400 Bad Request`: Invalid request payload, or missing email, OTP, or new password.
+    *   `401 Unauthorized`: Invalid or expired OTP.
+    *   `500 Internal Server Error`: Failed to reset password.
+
+#### 2.5. Get My Profile
 
 *   **URL:** `/api/me`
 *   **Method:** `GET`
@@ -179,7 +230,7 @@ Example (409 Conflict):
     *   `404 Not Found`: User not found.
     *   `500 Internal Server Error`: Failed to fetch user profile.
 
-#### 2.4. Update My Profile
+#### 2.6. Update My Profile
 
 *   **URL:** `/api/me`
 *   **Method:** `PATCH` or `PUT`
@@ -211,7 +262,7 @@ Example (409 Conflict):
     *   `404 Not Found`: User not found.
     *   `500 Internal Server Error`: Failed to update profile or email already in use.
 
-#### 2.5. Delete My Profile
+#### 2.7. Delete My Profile
 
 *   **URL:** `/api/me`
 *   **Method:** `DELETE`
@@ -223,6 +274,49 @@ Example (409 Conflict):
     *   `401 Unauthorized`: Missing or invalid token.
     *   `404 Not Found`: User not found.
     *   `500 Internal Server Error`: Failed to delete account.
+
+#### 2.8. OAuth Authentication Flow
+
+Markly supports authentication via third-party providers (e.g., Google, GitHub). The flow involves redirecting the user to the provider's authorization page and then handling the callback.
+
+##### 2.8.1. Initiate Provider Authentication
+
+*   **URL:** `/api/auth/{provider}`
+*   **Method:** `GET`
+*   **Description:** Initiates the OAuth authentication process for a specified provider. The user will be redirected to the provider's login page.
+*   **Authentication:** None
+*   **URL Parameters:**
+    *   `provider` (string, required): The name of the OAuth provider (e.g., `google`, `github`).
+*   **Success Behavior:** Redirects the user to the OAuth provider's authorization page.
+*   **Error Responses:**
+    *   `400 Bad Request`: Provider not specified.
+
+##### 2.8.2. Provider Callback (Internal)
+
+*   **URL:** `/api/auth/{provider}/callback`
+*   **Method:** `GET`
+*   **Description:** This endpoint is handled internally by the OAuth flow. After successful authentication with the provider, the user is redirected back to this URL. The backend processes the provider's response, logs in/registers the user, and sets a JWT cookie.
+*   **Authentication:** None (handled by OAuth provider)
+*   **Success Behavior:** Sets a JWT cookie and redirects to `/api/auth/success`.
+*   **Error Behavior:** Redirects to `/api/auth/error` if authentication fails.
+
+##### 2.8.3. Authentication Success Page
+
+*   **URL:** `/api/auth/success`
+*   **Method:** `GET`
+*   **Description:** A simple success page displayed after a successful OAuth login. The frontend should typically handle this redirect and close the authentication window/tab.
+*   **Authentication:** None
+*   **Success Response (200 OK):**
+    *   Returns a simple HTML message indicating success.
+
+##### 2.8.4. Authentication Error Page
+
+*   **URL:** `/api/auth/error`
+*   **Method:** `GET`
+*   **Description:** An error page displayed if OAuth authentication fails.
+*   **Authentication:** None
+*   **Error Response (400 Bad Request):**
+    *   Returns a simple HTML message indicating an authentication failure.
 
 ---
 
@@ -239,6 +333,7 @@ Example (409 Conflict):
     *   `category` (string): Category ObjectID to filter by.
     *   `collections` (string): Comma-separated list of collection ObjectIDs to filter by.
     *   `isFav` (boolean): `true` to get favorite bookmarks, `false` for non-favorites.
+    *   `page` (integer): The page number for pagination (defaults to 1).
 *   **Success Response (200 OK):**
     ```json
     [
@@ -900,13 +995,13 @@ Example (409 Conflict):
     *   `401 Unauthorized`: Missing or invalid token.
     *   `500 Internal Server Error`: Failed to generate summary.
 
-#### 7.4. Generate AI Suggestions
+#### 7.3. Generate AI Suggestions
 
 *   **URL:** `/api/agent/suggestions`
 *   **Method:** `GET`
 *   **Description:** Generates AI-powered bookmark suggestions based on the user's recent bookmarking activity.
 *   **Authentication:** Required (JWT)
-*   **Query Parameters (Optional):
+*   **Query Parameters (Optional):**
     *   `bookmarks` (string): Comma-separated list of bookmark ObjectIDs to filter by.
     *   `category` (string): Category ObjectID to filter by.
     *   `collection` (string): Comma-separated list of collection ObjectIDs to filter by.
@@ -946,43 +1041,165 @@ Example (409 Conflict):
     *   `500 Internal Server Error`: Failed to generate AI suggestions.
     *   `200 OK` with error message: "No recent bookmarks found to generate suggestions from. Please add some bookmarks first." (This is a specific case handled by the backend, returning 200 OK but with an informative message if no recent bookmarks are available).
 
-#### 7.3. Generate AI Suggestions
 
-*   **URL:** `/api/agent/suggestions`
+
+---
+
+### 8. Analytics Endpoints
+
+#### 8.1. Get User Growth
+
+*   **URL:** `/api/analytics/users/growth`
 *   **Method:** `GET`
-*   **Description:** Generates AI-powered bookmark suggestions based on the user's recent bookmarking activity.
+*   **Description:** Retrieves the count of new users created within a specified date range.
+*   **Authentication:** Required (JWT)
+*   **Query Parameters:**
+    *   `startDate` (string, required): The start date for the period (RFC3339 format, e.g., `2023-01-01T00:00:00Z`).
+    *   `endDate` (string, required): The end date for the period (RFC3339 format, e.g., `2023-01-31T23:59:59Z`).
+*   **Success Response (200 OK):**
+    ```json
+    {
+      "new_users": 10
+    }
+    ```
+    *   `new_users` (integer): The number of new users created in the specified period.
+*   **Error Responses:**
+    *   `400 Bad Request`: Invalid `startDate` or `endDate` format, or missing parameters.
+    *   `401 Unauthorized`: Missing or invalid token.
+    *   `500 Internal Server Error`: Failed to retrieve user growth data.
+
+#### 8.2. Get Bookmark Activity
+
+*   **URL:** `/api/analytics/bookmarks/activity`
+*   **Method:** `GET`
+*   **Description:** Retrieves the count of new bookmarks created within a specified date range.
+*   **Authentication:** Required (JWT)
+*   **Query Parameters:**
+    *   `startDate` (string, required): The start date for the period (RFC3339 format, e.g., `2023-01-01T00:00:00Z`).
+    *   `endDate` (string, required): The end date for the period (RFC3339 format, e.g., `2023-01-31T23:59:59Z`).
+*   **Success Response (200 OK):**
+    ```json
+    {
+      "new_bookmarks": 50
+    }
+    ```
+    *   `new_bookmarks` (integer): The number of new bookmarks created in the specified period.
+*   **Error Responses:**
+    *   `400 Bad Request`: Invalid `startDate` or `endDate` format, or missing parameters.
+    *   `401 Unauthorized`: Missing or invalid token.
+    *   `500 Internal Server Error`: Failed to retrieve bookmark activity data.
+
+#### 8.3. Get Bookmark Engagement
+
+*   **URL:** `/api/analytics/bookmarks/engagement`
+*   **Method:** `GET`
+*   **Description:** Retrieves engagement metrics for bookmarks, such as the count of favorite bookmarks for the authenticated user.
+*   **Authentication:** Required (JWT)
+*   **Success Response (200 OK):**
+    ```json
+    {
+      "favorite_bookmarks": 5
+    }
+    ```
+    *   `favorite_bookmarks` (integer): The number of favorite bookmarks for the user.
+*   **Error Responses:**
+    *   `401 Unauthorized`: Missing or invalid token.
+    *   `500 Internal Server Error`: Failed to retrieve bookmark engagement data.
+
+#### 8.4. Get Tag Trends
+
+*   **URL:** `/api/analytics/tags/trends`
+*   **Method:** `GET`
+*   **Description:** Retrieves a list of tags sorted by their weekly count in descending order, indicating trending tags.
 *   **Authentication:** Required (JWT)
 *   **Success Response (200 OK):**
     ```json
     [
       {
-        "url": "https://suggestion.com/article1",
-        "title": "Suggested Article One",
-        "summary": "A summary of a suggested article.",
-        "category": "Technology",
-        "collection": "Reading List",
-        "tags": ["AI", "Future"]
+        "id": "654321098765432109876554",
+        "name": "MongoDB",
+        "user_id": "654321098765432109876543",
+        "weeklyCount": 20,
+        "prevCount": 10,
+        "createdAt": "2023-11-10T09:00:00Z"
       },
       {
-        "url": "https://suggestion.com/article2",
-        "title": "Suggested Article Two",
-        "summary": "Another summary of a suggested article.",
-        "category": "Science",
-        "collection": "Research",
-        "tags": ["Physics"]
+        "id": "654321098765432109876555",
+        "name": "Testing",
+        "user_id": "654321098765432109876543",
+        "weeklyCount": 15,
+        "prevCount": 8,
+        "createdAt": "2023-11-12T11:00:00Z"
       },
       {
-        "url": "https://suggestion.com/article3",
-        "title": "Suggested Article Three",
-        "summary": "A third summary of a suggested article.",
-        "category": "History",
-        "collection": "Learning",
-        "tags": ["Ancient"]
+        "id": "654321098765432109876553",
+        "name": "Go",
+        "user_id": "654321098765432109876543",
+        "weeklyCount": 10,
+        "prevCount": 5,
+        "createdAt": "2023-11-17T10:10:00Z"
       }
     ]
     ```
-    *   Returns an array of `AISuggestion` objects.
+    *   Returns an array of `Tag` objects, sorted by `weeklyCount` descending.
 *   **Error Responses:**
     *   `401 Unauthorized`: Missing or invalid token.
-    *   `500 Internal Server Error`: Failed to generate AI suggestions.
-    *   `200 OK` with error message: "No recent bookmarks found to generate suggestions from. Please add some bookmarks first." (This is a specific case handled by the backend, returning 200 OK but with an informative message if no recent bookmarks are available).
+    *   `500 Internal Server Error`: Failed to retrieve tag trends data.
+
+#### 8.5. Get Trending Items
+
+*   **URL:** `/api/analytics/trending/items`
+*   **Method:** `GET`
+*   **Description:** Retrieves a list of trending items sorted by their count in descending order.
+*   **Authentication:** Required (JWT)
+*   **Success Response (200 OK):**
+    ```json
+    [
+      {
+        "id": "654321098765432109876556",
+        "name": "Item B",
+        "count": 200
+      },
+      {
+        "id": "654321098765432109876557",
+        "name": "Item A",
+        "count": 100
+      },
+      {
+        "id": "654321098765432109876558",
+        "name": "Item C",
+        "count": 50
+      }
+    ]
+    ```
+    *   Returns an array of `TrendingItem` objects, sorted by `count` descending.
+*   **Error Responses:**
+    *   `401 Unauthorized`: Missing or invalid token.
+    *   `500 Internal Server Error`: Failed to retrieve trending items data.
+
+---
+
+### 9. Monitoring
+
+#### 9.1. Prometheus Metrics
+
+*   **URL:** `/metrics`
+*   **Method:** `GET`
+*   **Description:** Exposes Prometheus metrics for monitoring the application's performance and health. This includes custom metrics for database query durations and errors, as well as standard Go runtime metrics.
+*   **Authentication:** None (typically accessed by a Prometheus server)
+*   **Success Response (200 OK):**
+    *   Returns a plain text response in Prometheus exposition format.
+    *   Example metrics:
+        ```
+        # HELP markly_db_query_duration_seconds Duration of database queries in seconds.
+        # TYPE markly_db_query_duration_seconds histogram
+        markly_db_query_duration_seconds_bucket{query_type="create",repository="user",status="success",le="0.005"} 1
+        markly_db_query_duration_seconds_bucket{query_type="create",repository="user",status="success",le="0.01"} 1
+        # ...
+        # HELP markly_db_query_errors_total Total number of database query errors.
+        # TYPE markly_db_query_errors_total counter
+        markly_db_query_errors_total{query_type="create",repository="user"} 0
+        # ...
+        ```
+*   **Error Responses:**
+    *   Standard HTTP error responses if the endpoint is unavailable.

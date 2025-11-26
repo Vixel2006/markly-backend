@@ -1,0 +1,21 @@
+global:
+  # The SMTP host and port to send emails through.
+  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+  # The email address to send alerts from.
+  smtp_from: '${SMTP_USERNAME}'
+  # The username for SMTP authentication.
+  smtp_auth_username: '${SMTP_USERNAME}'
+  # The password for SMTP authentication.
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  # Whether to use TLS for SMTP connections.
+  smtp_require_tls: true
+
+route:
+  # All alerts go to the 'email-receiver' by default.
+  receiver: 'email-receiver'
+
+receivers:
+  - name: 'email-receiver'
+    email_configs:
+      - to: '${SMTP_USERNAME}' # The email address to send alerts to.
+        send_resolved: true # Send a notification when an alert is resolved.
